@@ -144,7 +144,7 @@ fn build_engine(config: &ScoutConfig) -> crate::Result<Arc<dyn Engine>> {
                 .unwrap_or("default")
                 .to_string();
             Ok(Arc::new(crate::xunsearch_engine::XunSearchEngine::new(
-                &host, &project,
+                &host, &project, None,
             )))
         }
         other => {

@@ -134,8 +134,14 @@ pub fn validate_index_name(index: &str) -> crate::Result<()> {
 }
 
 /// RFC 3986 路径段百分号编码：仅保留 unreserved 字符，其余逐字节转 `%XX`
-/// （含 UTF-8 多字节）。所有引擎的 index/id 进入 URL 前统一编码，
+/// （含 UTF-8 多字节）。所有 HTTP 引擎的 index/id 进入 URL 前统一编码，
 /// 防止 `?`/`#`/`&` 截断路径与 `%2F` 绕过 `/` 校验。
+#[cfg(any(
+    feature = "elasticsearch",
+    feature = "meilisearch",
+    feature = "typesense",
+    feature = "algolia"
+))]
 pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {

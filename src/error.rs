@@ -25,10 +25,17 @@ pub enum ScoutError {
         feature = "elasticsearch",
         feature = "meilisearch",
         feature = "typesense",
-        feature = "algolia"
+        feature = "algolia",
+        feature = "xunsearch"
     ))]
     #[error("backend engine request failed: {0}")]
     Backend(String),
+    #[cfg(feature = "xunsearch")]
+    #[error("xunsearch error: {0}")]
+    XunSearch(String),
+    #[cfg(feature = "xunsearch")]
+    #[error("xunsearch I/O error: {0}")]
+    XunSearchIo(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, ScoutError>;

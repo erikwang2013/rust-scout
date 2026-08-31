@@ -25,6 +25,10 @@ pub mod typesense_engine;
 mod typesense_query;
 #[cfg(feature = "xunsearch")]
 pub mod xunsearch_engine;
+#[cfg(feature = "xunsearch")]
+mod xunsearch_query;
+#[cfg(all(test, feature = "xunsearch"))]
+mod xunsearch_tests;
 
 #[cfg(feature = "algolia")]
 pub use algolia_engine::AlgoliaEngine;
