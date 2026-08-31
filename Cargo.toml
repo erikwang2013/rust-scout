@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Scout-style full-text search engine abstraction for Rust"
 license = "MIT"
+repository = "https://github.com/erikwang2013/rust-scout"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
