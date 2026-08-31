@@ -52,6 +52,53 @@ impl ScoutConfig {
         config
     }
 
+    pub fn meilisearch(host: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let mut config = Self::collection();
+        config.driver = "meilisearch".to_string();
+        config.insert("meilisearch.host", host.into());
+        config.insert("meilisearch.api_key", api_key.into());
+        config
+    }
+
+    pub fn typesense(host: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let mut config = Self::collection();
+        config.driver = "typesense".to_string();
+        config.insert("typesense.host", host.into());
+        config.insert("typesense.api_key", api_key.into());
+        config
+    }
+
+    pub fn algolia(app_id: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let mut config = Self::collection();
+        config.driver = "algolia".to_string();
+        config.insert("algolia.app_id", app_id.into());
+        config.insert("algolia.api_key", api_key.into());
+        config
+    }
+
+    pub fn database(url: impl Into<String>, fields: Vec<String>) -> Self {
+        let mut config = Self::collection();
+        config.driver = "database".to_string();
+        config.insert("database.url", url.into());
+        config.insert("database.fields", serde_json::json!(fields));
+        config
+    }
+
+    pub fn null() -> Self {
+        Self {
+            driver: "null".to_string(),
+            ..Self::collection()
+        }
+    }
+
+    pub fn xunsearch(host: impl Into<String>, project: impl Into<String>) -> Self {
+        let mut config = Self::collection();
+        config.driver = "xunsearch".to_string();
+        config.insert("xunsearch.host", host.into());
+        config.insert("xunsearch.project", project.into());
+        config
+    }
+
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) {
         self.options.insert(key.into(), value.into());
     }
@@ -84,6 +131,22 @@ pub fn validate_index_name(index: &str) -> crate::Result<()> {
         return Err(crate::ScoutError::InvalidIndexName(index.to_string()));
     }
     Ok(())
+}
+
+/// RFC 3986 路径段百分号编码：仅保留 unreserved 字符，其余逐字节转 `%XX`
+/// （含 UTF-8 多字节）。所有引擎的 index/id 进入 URL 前统一编码，
+/// 防止 `?`/`#`/`&` 截断路径与 `%2F` 绕过 `/` 校验。
+pub(crate) fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

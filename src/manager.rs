@@ -22,25 +22,21 @@ impl EngineManager {
 
     pub fn engine(&self) -> crate::Result<Arc<dyn Engine>> {
         let driver = self.config.driver.clone();
-        #[cfg(not(feature = "elasticsearch"))]
-        if matches!(driver.as_str(), "elasticsearch" | "opensearch") {
-            return Err(crate::ScoutError::Unsupported(
-                "elasticsearch feature is not enabled".to_string(),
-            ));
-        }
-        // entry().or_insert_with 一次性完成查+构造+插入，
-        // 消除并发冷启动下 check-then-insert 的双实例竞态。
+        // 锁在 build 期间保持（等价于 entry().or_insert_with 的原子性）：
+        // 并发冷启动也不会构造出两个实例。
         let mut cache = self.engines.lock().expect("engine manager poisoned");
-        Ok(cache
-            .entry(driver)
-            .or_insert_with(|| build_engine(&self.config))
-            .clone())
+        if let Some(engine) = cache.get(&driver) {
+            return Ok(engine.clone());
+        }
+        let engine = build_engine(&self.config)?;
+        cache.insert(driver, engine.clone());
+        Ok(engine)
     }
 }
 
-#[cfg(feature = "elasticsearch")]
-fn build_engine(config: &ScoutConfig) -> Arc<dyn Engine> {
+fn build_engine(config: &ScoutConfig) -> crate::Result<Arc<dyn Engine>> {
     match config.driver.as_str() {
+        #[cfg(feature = "elasticsearch")]
         "elasticsearch" | "opensearch" => {
             let host = config
                 .get("elasticsearch.host")
@@ -53,15 +49,129 @@ fn build_engine(config: &ScoutConfig) -> Arc<dyn Engine> {
                 .or_else(|| config.get("opensearch.api_key"))
                 .and_then(|value| value.as_str())
                 .map(str::to_string);
-            Arc::new(crate::elasticsearch_engine::ElasticsearchEngine::new(host, api_key))
+            Ok(Arc::new(crate::elasticsearch_engine::ElasticsearchEngine::new(
+                host, api_key,
+            )))
         }
-        _ => Arc::new(CollectionEngine::new()),
+        #[cfg(feature = "database")]
+        "database" => {
+            let url = config
+                .get("database.url")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    crate::ScoutError::Unsupported(
+                        "database driver requires `database.url` config".to_string(),
+                    )
+                })?;
+            let fields = config
+                .get("database.fields")
+                .and_then(|value| value.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(Arc::new(crate::database_engine::DatabaseEngine::new(
+                url, fields,
+            )?))
+        }
+        #[cfg(feature = "meilisearch")]
+        "meilisearch" => {
+            let host = config
+                .get("meilisearch.host")
+                .and_then(|value| value.as_str())
+                .unwrap_or("http://127.0.0.1:7700")
+                .to_string();
+            let api_key = config
+                .get("meilisearch.api_key")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            Ok(Arc::new(crate::meilisearch_engine::MeilisearchEngine::new(
+                host, api_key,
+            )))
+        }
+        #[cfg(feature = "typesense")]
+        "typesense" => {
+            let host = config
+                .get("typesense.host")
+                .and_then(|value| value.as_str())
+                .unwrap_or("http://127.0.0.1:8108")
+                .to_string();
+            let api_key = config
+                .get("typesense.api_key")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            Ok(Arc::new(crate::typesense_engine::TypesenseEngine::new(
+                host, api_key,
+            )))
+        }
+        #[cfg(feature = "algolia")]
+        "algolia" => {
+            let app_id = config
+                .get("algolia.app_id")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    crate::ScoutError::Unsupported(
+                        "algolia driver requires `algolia.app_id` config".to_string(),
+                    )
+                })?;
+            let api_key = config
+                .get("algolia.api_key")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    crate::ScoutError::Unsupported(
+                        "algolia driver requires `algolia.api_key` config".to_string(),
+                    )
+                })?;
+            Ok(Arc::new(crate::algolia_engine::AlgoliaEngine::new(
+                app_id.to_string(),
+                api_key.to_string(),
+            )))
+        }
+        #[cfg(feature = "null")]
+        "null" => Ok(Arc::new(crate::null_engine::NullEngine::new())),
+        #[cfg(feature = "xunsearch")]
+        "xunsearch" => {
+            let host = config
+                .get("xunsearch.host")
+                .and_then(|value| value.as_str())
+                .unwrap_or("127.0.0.1:8383")
+                .to_string();
+            let project = config
+                .get("xunsearch.project")
+                .and_then(|value| value.as_str())
+                .unwrap_or("default")
+                .to_string();
+            Ok(Arc::new(crate::xunsearch_engine::XunSearchEngine::new(
+                &host, &project,
+            )))
+        }
+        other => {
+            if feature_missing(other) {
+                return Err(crate::ScoutError::Unsupported(format!(
+                    "engine driver `{other}` requires its feature to be enabled"
+                )));
+            }
+            Ok(Arc::new(CollectionEngine::new()))
+        }
     }
 }
 
-#[cfg(not(feature = "elasticsearch"))]
-fn build_engine(_config: &ScoutConfig) -> Arc<dyn Engine> {
-    Arc::new(CollectionEngine::new())
+/// 已知但未启用对应 feature 的 driver 列表；启用后由上面的 cfg 分支接住，
+/// 到不了这里。新增 feature 门控引擎时在 match 加分支、在匹配列表加名字。
+fn feature_missing(driver: &str) -> bool {
+    matches!(
+        driver,
+        "elasticsearch"
+            | "opensearch"
+            | "meilisearch"
+            | "typesense"
+            | "algolia"
+            | "database"
+            | "null"
+            | "xunsearch"
+    )
 }
 
 impl Default for EngineManager {

@@ -10,11 +10,24 @@ pub enum ScoutError {
     Unsupported(String),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[cfg(feature = "elasticsearch")]
+    #[cfg(any(
+        feature = "elasticsearch",
+        feature = "meilisearch",
+        feature = "typesense",
+        feature = "algolia"
+    ))]
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
-    #[cfg(feature = "elasticsearch")]
-    #[error("Elasticsearch/OpenSearch request failed: {0}")]
+    #[cfg(feature = "database")]
+    #[error("SQLite error: {0}")]
+    Sqlx(#[from] sqlx::Error),
+    #[cfg(any(
+        feature = "elasticsearch",
+        feature = "meilisearch",
+        feature = "typesense",
+        feature = "algolia"
+    ))]
+    #[error("backend engine request failed: {0}")]
     Backend(String),
 }
 

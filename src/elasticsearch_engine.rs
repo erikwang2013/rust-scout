@@ -1,5 +1,6 @@
+use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
-use crate::query::{build_body, check_bulk_items, parse_search_response, percent_encode};
+use crate::query::{build_body, check_bulk_items, parse_search_response};
 use crate::{SearchBuilder, SearchDocument, SearchResult};
 
 pub struct ElasticsearchEngine {

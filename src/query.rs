@@ -75,19 +75,6 @@ pub(crate) fn build_body(builder: &SearchBuilder, from: usize, size: usize) -> s
     body
 }
 
-pub(crate) fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
-
 pub(crate) fn parse_search_response(raw: &serde_json::Value) -> SearchResult {
     let empty_hits = Vec::new();
     let hits = raw
@@ -203,13 +190,6 @@ mod tests {
                 ]
             })
         );
-    }
-
-    #[test]
-    fn percent_encode_escapes_reserved_and_utf8() {
-        assert_eq!(percent_encode("a b/c"), "a%20b%2Fc");
-        assert_eq!(percent_encode("safe-._~AZ09"), "safe-._~AZ09");
-        assert_eq!(percent_encode("中文"), "%E4%B8%AD%E6%96%87");
     }
 
     #[test]
