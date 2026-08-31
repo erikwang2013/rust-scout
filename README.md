@@ -6,8 +6,9 @@
 
 **rust-scout 全文字搜索库抽象** —— 面向 Rust 的轻量全文搜索接口层。借鉴
 [Laravel Scout](https://laravel.com/docs/scout) 的链式查询心智，通过统一的
-`Engine` trait 抽象内存与 Elasticsearch/OpenSearch 两类后端：**开发用零依赖内存驱动，
-生产无缝切换 ES 集群，业务代码一行不改。**
+`Engine` trait 抽象内存、Elasticsearch/OpenSearch、Meilisearch、Typesense、
+Algolia、SQLite 等多类后端：**开发用零依赖内存驱动，生产无缝切换任意后端，
+业务代码一行不改。**
 
 ```rust
 let result = engine.search(
@@ -30,7 +31,7 @@ let result = engine.search(
 | 📃 分页 | `take`/`skip` 偏移截取 + `paginate(page, per_page)` 页码分页 |
 | 🗂️ 多索引 | 文档级 `index` 字段路由，默认索引 `"default"` |
 | 🔄 索引生命周期 | `create_index` / `flush` / `delete_index` 全流程 |
-| 🔌 可插拔驱动 | 默认内存零依赖；`elasticsearch` feature 按需启用 |
+| 🔌 可插拔驱动 | 默认内存零依赖；`elasticsearch` / `meilisearch` / `typesense` / `algolia` / `database` / `null` feature 按需启用；`xunsearch` 为占位 stub |
 | 🔒 安全边界 | 索引名校验（`validate_index_name`）+ RFC 3986 百分号编码，杜绝路径注入 |
 
 ## 架构
@@ -192,6 +193,41 @@ let engine = EngineManager::new(config).engine()?;
 | 分页默认 | 全部结果 | size 10 |
 | 排序默认 | 按 id | 按 _score |
 
+### 切换到 Meilisearch
+
+```bash
+cargo add rust-scout --features meilisearch
+```
+
+```rust
+use rust_scout::{Engine, EngineManager, ScoutConfig};
+
+let config = ScoutConfig::meilisearch(
+    "http://127.0.0.1:7700",   // Meilisearch 服务地址
+    "your-master-key",          // 可选：API 密钥
+);
+let engine = EngineManager::new(config).engine()?;
+// —— 之后所有操作与内存驱动完全一致 ——
+```
+
+### 引擎对照
+
+| 引擎 | driver | feature | 状态 |
+|------|--------|---------|------|
+| 内存（默认） | `collection` | 内置 | 完整 |
+| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | 完整 |
+| Meilisearch | `meilisearch` | `meilisearch` | 完整 |
+| Typesense | `typesense` | `typesense` | 完整 |
+| Algolia | `algolia` | `algolia` | 完整 |
+| SQLite | `database` | `database` | 完整 |
+| Null（测试/禁用搜索） | `null` | `null` | 完整 |
+| XunSearch | `xunsearch` | `xunsearch` | stub（待实现） |
+
+其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
+
+> SQLite 引擎（`database`）的 `total` 为 SQL 层计数（索引 + LIKE 粗筛），
+> wheres / 软删除在内存过滤后可能使 `hits.len() < total`，分页以 hits 为准。
+
 ### 保留字段
 
 `__soft_deleted` 是软删除功能（`Engine::soft_delete`、`SearchBuilder::with_trashed()`
@@ -225,6 +261,59 @@ impl Searchable for Article {
     }
 }
 ```
+
+## 支持与打赏
+
+如果这个项目对你有帮助，欢迎打赏支持 ☕ —— 您的支持是持续维护的动力！
+
+### 微信 / 支付宝
+
+<img src="docs/weixinpay.png" alt="微信打赏" width="130" height="130"/>
+<img src="docs/alipay.png" alt="支付宝打赏" width="130" height="130"/>
+
+微信扫码 · 支付宝扫码
+
+### 虚拟币打赏
+
+| 主网 | 钱包地址 | 二维码 |
+|------|----------|--------|
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/1.jpg" width="130" height="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="docs/coin/2.jpg" width="130" height="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/3.jpg" width="130" height="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="docs/coin/4.jpg" width="130" height="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/5.jpg" width="130" height="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/6.jpg" width="130" height="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="docs/coin/7.jpg" width="130" height="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="docs/coin/8.jpg" width="130" height="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/9.jpg" width="130" height="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/10.jpg" width="130" height="130"/> |
+
+### 全球转账（银行汇款）
+
+**收款人信息**
+
+- 收款人姓名：WANG KEXUN
+- 收款账户号码：881015918251
+
+**收款银行（ZA Bank）**
+
+- SWIFT Code：`AABLHKHHXXX`
+- 银行名称：ZA Bank Limited
+- 银行编号：387
+- 银行地址：Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
+
+> 跨境汇款代理银行（中转银行）信息，非收款银行信息。请向汇款银行查询是否需要提供。
+
+- 汇入港元、人民币及美元的代理银行为 **Citibank**：
+  - 银行名称：Citibank N.A. Hong Kong
+  - SWIFT Code：`CITIHKHXXXX`
+  - 银行编号：006 / 分行编号：391
+  - 分行名称：Hong Kong Branch
+  - 银行地址：Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
+- 汇入其他币种时的代理银行为 **BNY Mellon**：
+  - 银行名称：THE BANK OF NEW YORK MELLON
+  - SWIFT Code：`IRVTUS3NXXX`
+  - 银行地址：THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## 许可证
 
