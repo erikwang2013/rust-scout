@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/rust-scout)](https://docs.rs/rust-scout)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Scout-style 全文字搜索库抽象** —— 面向 Rust 的轻量全文搜索接口层。借鉴
+**rust-scout 全文字搜索库抽象** —— 面向 Rust 的轻量全文搜索接口层。借鉴
 [Laravel Scout](https://laravel.com/docs/scout) 的链式查询心智，通过统一的
 `Engine` trait 抽象内存与 Elasticsearch/OpenSearch 两类后端：**开发用零依赖内存驱动，
 生产无缝切换 ES 集群，业务代码一行不改。**
@@ -191,6 +191,12 @@ let engine = EngineManager::new(config).engine()?;
 | flush | no-op | `_refresh` |
 | 分页默认 | 全部结果 | size 10 |
 | 排序默认 | 按 id | 按 _score |
+
+### 保留字段
+
+`__soft_deleted` 是软删除功能（`Engine::soft_delete`、`SearchBuilder::with_trashed()`
+/ `only_trashed()`）使用的保留字段名，引擎据此过滤软删除文档。用户文档**不应**
+使用该字段名作为业务字段。
 
 ### 错误处理
 

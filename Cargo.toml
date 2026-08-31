@@ -1,6 +1,6 @@
 [package]
 name = "rust-scout"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Scout-style full-text search engine abstraction for Rust"
 license = "MIT"

@@ -4,13 +4,15 @@ pub mod config;
 pub mod document;
 #[cfg(feature = "elasticsearch")]
 pub mod elasticsearch_engine;
+#[cfg(feature = "elasticsearch")]
+mod query;
 pub mod engine;
 pub mod error;
 pub mod manager;
 pub mod result;
 pub mod searchable;
 
-pub use builder::SearchBuilder;
+pub use builder::{SearchBuilder, TrashedFilter};
 pub use collection_engine::CollectionEngine;
 pub use config::{validate_index_name, ScoutConfig};
 pub use document::SearchDocument;

@@ -22,6 +22,19 @@ pub struct SearchBuilder {
     pub take: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip: Option<usize>,
+    #[serde(default)]
+    pub trashed: TrashedFilter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub enum TrashedFilter {
+    /// 排除软删除（`__soft_deleted: true`）的文档（默认）。
+    #[default]
+    Exclude,
+    /// 软删除与未删除的文档都包含。
+    WithTrashed,
+    /// 仅包含软删除的文档。
+    OnlyTrashed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +61,7 @@ impl Default for SearchBuilder {
             options: serde_json::Value::Object(Default::default()),
             take: None,
             skip: None,
+            trashed: TrashedFilter::Exclude,
         }
     }
 }
@@ -112,6 +126,16 @@ impl SearchBuilder {
 
     pub fn skip(mut self, offset: usize) -> Self {
         self.skip = Some(offset);
+        self
+    }
+
+    pub fn with_trashed(mut self) -> Self {
+        self.trashed = TrashedFilter::WithTrashed;
+        self
+    }
+
+    pub fn only_trashed(mut self) -> Self {
+        self.trashed = TrashedFilter::OnlyTrashed;
         self
     }
 
@@ -209,5 +233,61 @@ fn number_cmp(a: &serde_json::Number, b: &serde_json::Number) -> std::cmp::Order
                 a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Less)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SearchDocument;
+
+    fn doc(fields: serde_json::Value) -> SearchDocument {
+        SearchDocument::new("id", fields).unwrap()
+    }
+
+    #[test]
+    fn matches_is_case_insensitive() {
+        let builder = SearchBuilder::new("HELLO");
+        assert!(builder.matches(&doc(serde_json::json!({"title": "hello world"}))));
+        assert!(builder.matches(&doc(serde_json::json!({"title": "HeLLo"}))));
+        assert!(!builder.matches(&doc(serde_json::json!({"title": "goodbye"}))));
+    }
+
+    #[test]
+    fn matches_empty_query_matches_all() {
+        let builder = SearchBuilder::default();
+        assert!(builder.matches(&doc(serde_json::json!({"a": 1}))));
+        assert!(builder.matches(&doc(serde_json::json!({"b": [1, 2, 3]}))));
+    }
+
+    #[test]
+    fn matches_number_and_bool_equality() {
+        let builder = SearchBuilder::new("")
+            .where_field("count", 5)
+            .where_field("active", true);
+        assert!(builder.matches(&doc(serde_json::json!({"count": 5, "active": true}))));
+        assert!(!builder.matches(&doc(serde_json::json!({"count": 5, "active": false}))));
+        assert!(!builder.matches(&doc(serde_json::json!({"count": 6, "active": true}))));
+    }
+
+    #[test]
+    fn matches_where_in_empty_list_matches_nothing() {
+        let builder = SearchBuilder::new("").where_in("tag", std::iter::empty::<i64>());
+        assert!(!builder.matches(&doc(serde_json::json!({"tag": "x"}))));
+    }
+
+    #[test]
+    fn trashed_filter_serializes_with_default_exclude() {
+        assert_eq!(serde_json::to_string(&TrashedFilter::default()).unwrap(), "\"Exclude\"");
+        let builder = SearchBuilder::default().with_trashed().only_trashed();
+        assert_eq!(builder.trashed, TrashedFilter::OnlyTrashed);
+        assert_eq!(
+            serde_json::from_str::<SearchBuilder>(
+                r#"{"query":"x","trashed":"WithTrashed"}"#
+            )
+            .unwrap()
+            .trashed,
+            TrashedFilter::WithTrashed
+        );
     }
 }

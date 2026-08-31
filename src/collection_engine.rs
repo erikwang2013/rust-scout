@@ -26,11 +26,17 @@ impl CollectionEngine {
     }
 
     fn collect_hits(&self, index: &str, builder: &SearchBuilder) -> Vec<SearchHit> {
+        // 软删除过滤在 collect_hits 做；matches() 保持纯匹配语义。
         let guard = self.docs.lock().expect("collection engine poisoned");
         guard
             .get(index)
             .map(|map| {
                 map.values()
+                    .filter(|doc| match builder.trashed {
+                        crate::TrashedFilter::Exclude => !soft_deleted(doc),
+                        crate::TrashedFilter::OnlyTrashed => soft_deleted(doc),
+                        crate::TrashedFilter::WithTrashed => true,
+                    })
                     .filter(|doc| builder.matches(doc))
                     .map(SearchHit::from)
                     .collect()
@@ -47,6 +53,13 @@ impl CollectionEngine {
         let hits = hits.into_iter().skip(offset).take(take).collect();
         (hits, total)
     }
+}
+
+fn soft_deleted(doc: &SearchDocument) -> bool {
+    doc.fields
+        .get("__soft_deleted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 impl Engine for CollectionEngine {
@@ -72,6 +85,43 @@ impl Engine for CollectionEngine {
                     ids_set.remove(id);
                 }
             }
+            Ok(())
+        })
+    }
+
+    fn delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            let mut guard = self.docs.lock().expect("collection engine poisoned");
+            if let Some(ids_set) = guard.get_mut(index) {
+                for id in ids {
+                    ids_set.remove(id);
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            // 与 delete() 一致的跨索引语义：标记所有索引中匹配 id 的文档。
+            let mut guard = self.docs.lock().expect("collection engine poisoned");
+            for ids_set in guard.values_mut() {
+                for id in ids {
+                    if let Some(doc) = ids_set.get_mut(id) {
+                        doc.set("__soft_deleted", true);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn reindex<'a>(&'a self, from: &'a str, to: &'a str) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            let mut guard = self.docs.lock().expect("collection engine poisoned");
+            // from 不存在时 to 得到空索引（与 create_index 语义一致）。
+            let source = guard.get(from).cloned().unwrap_or_default();
+            guard.insert(to.to_string(), source);
             Ok(())
         })
     }
@@ -189,5 +239,111 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.total, 1);
+    }
+
+    #[tokio::test]
+    async fn delete_in_only_removes_from_given_index() {
+        let engine = CollectionEngine::new();
+        engine
+            .update(&[doc("one", Some("books")), doc("one", Some("movies"))])
+            .await
+            .unwrap();
+        engine.delete_in("books", &["one".to_string()]).await.unwrap();
+        let books = engine
+            .search(&SearchBuilder::new("").within("books"))
+            .await
+            .unwrap();
+        let movies = engine
+            .search(&SearchBuilder::new("").within("movies"))
+            .await
+            .unwrap();
+        assert_eq!(books.total, 0);
+        assert_eq!(movies.total, 1);
+    }
+
+    #[tokio::test]
+    async fn reindex_copies_docs_keeps_source() {
+        let engine = CollectionEngine::new();
+        engine.update(&[doc("one", Some("books"))]).await.unwrap();
+        engine.reindex("books", "archive").await.unwrap();
+        let source = engine
+            .search(&SearchBuilder::new("").within("books"))
+            .await
+            .unwrap();
+        let copy = engine
+            .search(&SearchBuilder::new("").within("archive"))
+            .await
+            .unwrap();
+        assert_eq!(source.total, 1);
+        assert_eq!(copy.total, 1);
+    }
+
+    #[tokio::test]
+    async fn reindex_missing_source_creates_empty_target() {
+        let engine = CollectionEngine::new();
+        engine.reindex("nope", "target").await.unwrap();
+        let result = engine
+            .search(&SearchBuilder::new("").within("target"))
+            .await
+            .unwrap();
+        assert_eq!(result.total, 0);
+    }
+
+    #[tokio::test]
+    async fn soft_delete_filters_per_trashed() {
+        let engine = CollectionEngine::new();
+        engine
+            .update(&[doc("one", Some("books")), doc("two", Some("books"))])
+            .await
+            .unwrap();
+        engine.soft_delete(&["one".to_string()]).await.unwrap();
+
+        let excluded = engine
+            .search(&SearchBuilder::new("").within("books"))
+            .await
+            .unwrap();
+        assert_eq!(excluded.total, 1);
+        assert_eq!(excluded.hits[0].id, "two");
+
+        let only = engine
+            .search(&SearchBuilder::new("").within("books").only_trashed())
+            .await
+            .unwrap();
+        assert_eq!(only.total, 1);
+        assert_eq!(only.hits[0].id, "one");
+
+        let all = engine
+            .search(&SearchBuilder::new("").within("books").with_trashed())
+            .await
+            .unwrap();
+        assert_eq!(all.total, 2);
+    }
+
+    #[tokio::test]
+    async fn soft_delete_filter_ignores_non_true_markers() {
+        // 只有 `__soft_deleted == true` 才算软删除：false/字符串/缺失值在
+        // Exclude 下可见、OnlyTrashed 下不可见（与 ES term 语义对齐）。
+        let engine = CollectionEngine::new();
+        let mut marked_false = doc("false", Some("books"));
+        marked_false.set("__soft_deleted", false);
+        let mut marked_str = doc("str", Some("books"));
+        marked_str.set("__soft_deleted", "x");
+        let mut marked_true = doc("gone", Some("books"));
+        marked_true.set("__soft_deleted", true);
+        engine.update(&[marked_false, marked_str, marked_true]).await.unwrap();
+
+        let excluded = engine
+            .search(&SearchBuilder::new("").within("books"))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = excluded.hits.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["false", "str"]);
+
+        let only = engine
+            .search(&SearchBuilder::new("").within("books").only_trashed())
+            .await
+            .unwrap();
+        let ids: Vec<&str> = only.hits.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["gone"]);
     }
 }

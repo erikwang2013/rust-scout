@@ -85,3 +85,21 @@ pub fn validate_index_name(index: &str) -> crate::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_index_name_accepts_valid() {
+        assert!(validate_index_name("books").is_ok());
+        assert!(validate_index_name("a-b_c.d~中文").is_ok());
+    }
+
+    #[test]
+    fn validate_index_name_rejects_invalid() {
+        for bad in ["", " ", "a b", "a/b", "a\\b", ".hidden", "\t", "\n"] {
+            assert!(validate_index_name(bad).is_err(), "should reject {:?}", bad);
+        }
+    }
+}
