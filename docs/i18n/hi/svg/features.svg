@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 590" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <style>
+      .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
+      .sub   { font-size: 13px; fill: #64748b; }
+      .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; rx: 10; }
+      .card:hover { stroke: #2563eb; }
+      .name  { font-size: 15px; font-weight: 600; fill: #0f172a; }
+      .desc  { font-size: 12px; fill: #475569; }
+      .api   { font-size: 10.5px; fill: #2563eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ico   { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.2; rx: 6; }
+    </style>
+  </defs>
+
+  <text x="550" y="42" text-anchor="middle" class="title">सुविधाएँ</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">क्वेरी निर्माण से ड्राइवर स्विचिंग तक — सब कुछ एकीकृत Engine ट्रेट के माध्यम से</text>
+
+  <!-- 1 चेन-आधारित क्वेरी -->
+  <rect x="40" y="100" width="330" height="140" class="card"/>
+  <rect x="60" y="118" width="40" height="40" class="ico"/>
+  <text x="80" y="144" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">Q</text>
+  <text x="115" y="136" class="name">चेन-आधारित क्वेरी निर्माण</text>
+  <text x="115" y="156" class="desc">एक पंक्ति में पूरी क्वेरी बनाएं</text>
+  <text x="60" y="206" class="api">SearchBuilder::new(&#34;rust&#34;)</text>
+  <text x="60" y="222" class="api">  .within(&#34;books&#34;).take(10)</text>
+
+  <!-- 2 पूर्ण-पाठ खोज -->
+  <rect x="385" y="100" width="330" height="140" class="card"/>
+  <rect x="405" y="118" width="40" height="40" class="ico"/>
+  <text x="425" y="144" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">T</text>
+  <text x="460" y="136" class="name">पूर्ण-पाठ खोज</text>
+  <text x="460" y="156" class="desc">इन-मेमोरी सबस्ट्रिंग मिलान · ES ड्राइवर</text>
+  <text x="460" y="172" class="desc">query_string सिंटैक्स</text>
+  <text x="405" y="206" class="api">query: &#34;rust&#34; / &#34;type:book&#34;</text>
+
+  <!-- 3 सटीक फ़िल्टर -->
+  <rect x="730" y="100" width="330" height="140" class="card"/>
+  <rect x="750" y="118" width="40" height="40" class="ico"/>
+  <text x="770" y="144" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">=</text>
+  <text x="805" y="136" class="name">सटीक फ़िल्टर</text>
+  <text x="805" y="156" class="desc">फ़ील्ड समानता मिलान (ES में term मैप)</text>
+  <text x="750" y="206" class="api">.where_field(&#34;status&#34;, &#34;published&#34;)</text>
+
+  <!-- 4 सेट फ़िल्टर -->
+  <rect x="40" y="255" width="330" height="140" class="card"/>
+  <rect x="60" y="273" width="40" height="40" class="ico"/>
+  <text x="80" y="299" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">∈</text>
+  <text x="115" y="291" class="name">सेट फ़िल्टर</text>
+  <text x="115" y="311" class="desc">IN / NOT IN सिमेंटिक्स (ES में</text>
+  <text x="115" y="327" class="desc">terms / must_not terms मैप)</text>
+  <text x="60" y="361" class="api">.where_in(&#34;tags&#34;, [&#34;a&#34;, &#34;b&#34;])</text>
+  <text x="60" y="377" class="api">.where_not_in(&#34;tags&#34;, [&#34;x&#34;])</text>
+
+  <!-- 5 सॉर्टिंग -->
+  <rect x="385" y="255" width="330" height="140" class="card"/>
+  <rect x="405" y="273" width="40" height="40" class="ico"/>
+  <text x="425" y="299" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">⇅</text>
+  <text x="460" y="291" class="name">बहु-फ़ील्ड सॉर्टिंग</text>
+  <text x="460" y="311" class="desc">asc / desc समर्थित, स्टैक करने योग्य</text>
+  <text x="405" y="361" class="api">.order_by(&#34;created_at&#34;, true)</text>
+
+  <!-- 6 पेजिनेशन -->
+  <rect x="730" y="255" width="330" height="140" class="card"/>
+  <rect x="750" y="273" width="40" height="40" class="ico"/>
+  <text x="770" y="299" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">P</text>
+  <text x="805" y="291" class="name">पेजिनेशन</text>
+  <text x="805" y="311" class="desc">ऑफ़सेट कट + पेज-आधारित पेजिनेशन</text>
+  <text x="750" y="361" class="api">.take(10).skip(20)</text>
+  <text x="750" y="377" class="api">engine.paginate(&amp;b, page, per)</text>
+
+  <!-- 7 बहु-इंडेक्स -->
+  <rect x="40" y="410" width="330" height="140" class="card"/>
+  <rect x="60" y="428" width="40" height="40" class="ico"/>
+  <text x="80" y="454" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">I</text>
+  <text x="115" y="446" class="name">बहु-इंडेक्स</text>
+  <text x="115" y="466" class="desc">दस्तावेज़-स्तरीय index फ़ील्ड, डिफ़ॉल्ट</text>
+  <text x="115" y="482" class="desc">&#34;default&#34;, लिखने/क्वेरी में निर्दिष्ट किया जा सकता है</text>
+  <text x="60" y="516" class="api">SearchDocument.index / builder.within()</text>
+
+  <!-- 8 इंडेक्स जीवनचक्र -->
+  <rect x="385" y="410" width="330" height="140" class="card"/>
+  <rect x="405" y="428" width="40" height="40" class="ico"/>
+  <text x="425" y="454" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">L</text>
+  <text x="460" y="446" class="name">इंडेक्स जीवनचक्र</text>
+  <text x="460" y="466" class="desc">इंडेक्स बनाएं / रीफ़्रेश करें / हटाएं</text>
+  <text x="405" y="516" class="api">create_index · flush · delete_index</text>
+
+  <!-- 9 प्लगेबल ड्राइवर -->
+  <rect x="730" y="410" width="330" height="140" class="card"/>
+  <rect x="750" y="428" width="40" height="40" class="ico"/>
+  <text x="770" y="454" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">D</text>
+  <text x="805" y="446" class="name">प्लगेबल ड्राइवर</text>
+  <text x="805" y="466" class="desc">बैकएंड बदलने के लिए सिर्फ़ कॉन्फ़िग बदलें</text>
+  <text x="750" y="516" class="api">ScoutConfig::elasticsearch(host, key)</text>
+</svg>

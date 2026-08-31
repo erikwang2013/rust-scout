@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <style>
+      .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
+      .sub   { font-size: 13px; fill: #64748b; }
+      .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; rx: 10; }
+      .num   { font-size: 20px; font-weight: 700; fill: #2563eb; }
+      .name  { font-size: 15px; font-weight: 600; fill: #0f172a; }
+      .desc  { font-size: 12px; fill: #475569; }
+      .code  { font-size: 11px; fill: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .rule  { fill: #dbeafe; }
+    </style>
+  </defs>
+
+  <text x="550" y="42" text-anchor="middle" class="title">Conception</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">Cinq principes de conception — chacun correspond à une décision concrète dans le code</text>
+
+  <!-- 1 -->
+  <rect x="40" y="90" width="1020" height="92" class="card"/>
+  <rect x="60" y="106" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="132" text-anchor="middle" class="num">1</text>
+  <text x="118" y="122" class="name">API chaînée façon Scout</text>
+  <text x="118" y="142" class="desc">Dans l'esprit de Laravel Scout : d'abord construire la requête, puis l'exécuter d'un seul appel. Séparer construction et exécution facilite la réutilisation et les tests.</text>
+  <text x="118" y="162" class="code">let b = SearchBuilder::new(q).within(i).where_field(f, v).order_by(k, true).take(10);</text>
+
+  <!-- 2 -->
+  <rect x="40" y="194" width="1020" height="92" class="card"/>
+  <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="236" text-anchor="middle" class="num">2</text>
+  <text x="118" y="226" class="name">Abstraction des moteurs — le trait Engine comme seule couture</text>
+  <text x="118" y="246" class="desc">8 opérations définissent un contrat unique, retour asynchrone via EngineFuture. Changer de backend = changer de configuration, code métier inchangé.</text>
+  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::elasticsearch(host, key)).engine()?;  // 或 collection()</text>
+
+  <!-- 3 -->
+  <rect x="40" y="298" width="1020" height="92" class="card"/>
+  <rect x="60" y="314" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="340" text-anchor="middle" class="num">3</text>
+  <text x="118" y="330" class="name">Le contrat de données d'abord — serde JSON</text>
+  <text x="118" y="350" class="desc">Écriture, requête et résultats sont des données JSON structurées, indépendantes du moteur. Searchable fait le pont entre modèles métier et documents.</text>
+  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total }</text>
+
+  <!-- 4 -->
+  <rect x="40" y="402" width="1020" height="92" class="card"/>
+  <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="444" text-anchor="middle" class="num">4</text>
+  <text x="118" y="434" class="name">La simplicité d'abord — zéro dépendance par défaut</text>
+  <text x="118" y="454" class="desc">Le moteur mémoire fonctionne immédiatement, dépendances : serde/thiserror uniquement ; le moteur Elasticsearch est un feature optionnel, à ajouter selon les besoins.</text>
+  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"]   // cargo add rust-scout --features elasticsearch</text>
+
+  <!-- 5 -->
+  <rect x="40" y="506" width="1020" height="92" class="card"/>
+  <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="548" text-anchor="middle" class="num">5</text>
+  <text x="118" y="538" class="name">Limites de sécurité — validation des entrées + échappement des sorties</text>
+  <text x="118" y="558" class="desc">Le nom d'index passe par validate_index_name avant d'entrer dans l'URL ; id/index sont encodés en pourcentage (RFC 3986) — aucune injection de chemin, aucune écriture dans un mauvais index.</text>
+  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) →  /{index}/_doc/{id}</text>
+</svg>

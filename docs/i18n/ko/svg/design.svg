@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <style>
+      .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
+      .sub   { font-size: 13px; fill: #64748b; }
+      .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; rx: 10; }
+      .num   { font-size: 20px; font-weight: 700; fill: #2563eb; }
+      .name  { font-size: 15px; font-weight: 600; fill: #0f172a; }
+      .desc  { font-size: 12px; fill: #475569; }
+      .code  { font-size: 11px; fill: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .rule  { fill: #dbeafe; }
+    </style>
+  </defs>
+
+  <text x="550" y="42" text-anchor="middle" class="title">설계 철학</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">다섯 가지 설계 원칙 — 각각은 코드의 구체적인 결정과 대응</text>
+
+  <!-- 1 -->
+  <rect x="40" y="90" width="1020" height="92" class="card"/>
+  <rect x="60" y="106" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="132" text-anchor="middle" class="num">1</text>
+  <text x="118" y="122" class="name">Scout 스타일 체인 API</text>
+  <text x="118" y="142" class="desc">Laravel Scout의 사고방식을 따름: 먼저 쿼리를 구성한 뒤 한 번의 호출로 실행. 쿼리와 실행을 분리하여 재사용과 테스트가 쉽습니다.</text>
+  <text x="118" y="162" class="code">let b = SearchBuilder::new(q).within(i).where_field(f, v).order_by(k, true).take(10);</text>
+
+  <!-- 2 -->
+  <rect x="40" y="194" width="1020" height="92" class="card"/>
+  <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="236" text-anchor="middle" class="num">2</text>
+  <text x="118" y="226" class="name">드라이버 추상화 — Engine trait이 유일한 접합점</text>
+  <text x="118" y="246" class="desc">8가지 작업이 통일 계약을 정의하고 async EngineFuture로 반환. 백엔드 변경 = 설정 변경, 비즈니스 코드 변경 없음.</text>
+  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::elasticsearch(host, key)).engine()?;  // 或 collection()</text>
+
+  <!-- 3 -->
+  <rect x="40" y="298" width="1020" height="92" class="card"/>
+  <rect x="60" y="314" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="340" text-anchor="middle" class="num">3</text>
+  <text x="118" y="330" class="name">데이터 계약 우선 — serde JSON</text>
+  <text x="118" y="350" class="desc">쓰기, 쿼리, 결과는 모두 JSON 구조화 데이터이며 드라이버와 무관. Searchable이 비즈니스 모델과 문서를 연결.</text>
+  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total }</text>
+
+  <!-- 4 -->
+  <rect x="40" y="402" width="1020" height="92" class="card"/>
+  <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="444" text-anchor="middle" class="num">4</text>
+  <text x="118" y="434" class="name">단순함 우선 — 기본은 의존성 없음</text>
+  <text x="118" y="454" class="desc">기본 메모리 드라이버는 즉시 사용 가능하며 serde/thiserror에만 의존. Elasticsearch 드라이버는 선택 feature로 필요 시 도입.</text>
+  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"]   // cargo add rust-scout --features elasticsearch</text>
+
+  <!-- 5 -->
+  <rect x="40" y="506" width="1020" height="92" class="card"/>
+  <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="548" text-anchor="middle" class="num">5</text>
+  <text x="118" y="538" class="name">보안 경계 — 입력 검증 + 출력 이스케이프</text>
+  <text x="118" y="558" class="desc">인덱스 이름은 URL에 들어가기 전에 validate_index_name으로 검증되고, id/index는 RFC 3986 퍼센트 인코딩되어 경로 주입과 잘못된 인덱스 쓰기를 차단.</text>
+  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) →  /{index}/_doc/{id}</text>
+</svg>
