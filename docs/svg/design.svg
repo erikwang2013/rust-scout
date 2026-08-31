@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <style>
+      .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
+      .sub   { font-size: 13px; fill: #64748b; }
+      .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; rx: 10; }
+      .num   { font-size: 20px; font-weight: 700; fill: #2563eb; }
+      .name  { font-size: 15px; font-weight: 600; fill: #0f172a; }
+      .desc  { font-size: 12px; fill: #475569; }
+      .code  { font-size: 11px; fill: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .rule  { fill: #dbeafe; }
+    </style>
+  </defs>
+
+  <text x="550" y="42" text-anchor="middle" class="title">设计思路</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">五条设计原则 — 每条都对应代码中的一个具体决策</text>
+
+  <!-- 1 -->
+  <rect x="40" y="90" width="1020" height="92" class="card"/>
+  <rect x="60" y="106" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="132" text-anchor="middle" class="num">1</text>
+  <text x="118" y="122" class="name">Scout 风格链式 API</text>
+  <text x="118" y="142" class="desc">沿用 Laravel Scout 心智：先构建查询，再一次调用执行。查询与执行分离，便于复用与测试。</text>
+  <text x="118" y="162" class="code">let b = SearchBuilder::new(q).within(i).where_field(f, v).order_by(k, true).take(10);</text>
+
+  <!-- 2 -->
+  <rect x="40" y="194" width="1020" height="92" class="card"/>
+  <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="236" text-anchor="middle" class="num">2</text>
+  <text x="118" y="226" class="name">驱动抽象 — Engine trait 是唯一的接缝</text>
+  <text x="118" y="246" class="desc">8 个操作定义统一契约，异步 EngineFuture 返回。换后端 = 改配置，业务代码零改动。</text>
+  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::elasticsearch(host, key)).engine()?;  // 或 collection()</text>
+
+  <!-- 3 -->
+  <rect x="40" y="298" width="1020" height="92" class="card"/>
+  <rect x="60" y="314" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="340" text-anchor="middle" class="num">3</text>
+  <text x="118" y="330" class="name">数据契约先行 — serde JSON</text>
+  <text x="118" y="350" class="desc">写入、查询、结果全部是 JSON 结构化数据，驱动无关。Searchable 桥接业务模型与文档。</text>
+  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total }</text>
+
+  <!-- 4 -->
+  <rect x="40" y="402" width="1020" height="92" class="card"/>
+  <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="444" text-anchor="middle" class="num">4</text>
+  <text x="118" y="434" class="name">简单优先 — 默认零依赖</text>
+  <text x="118" y="454" class="desc">默认内存驱动开箱即用，仅依赖 serde/thiserror；Elasticsearch 驱动是可选 feature，按需引入。</text>
+  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"]   // cargo add rust-scout --features elasticsearch</text>
+
+  <!-- 5 -->
+  <rect x="40" y="506" width="1020" height="92" class="card"/>
+  <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
+  <text x="80" y="548" text-anchor="middle" class="num">5</text>
+  <text x="118" y="538" class="name">安全边界 — 输入校验 + 输出转义</text>
+  <text x="118" y="558" class="desc">索引名在进入 URL 前经 validate_index_name 校验，id/index 经 RFC 3986 百分号编码，杜绝路径注入与错误索引写入。</text>
+  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) →  /{index}/_doc/{id}</text>
+</svg>
