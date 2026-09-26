@@ -36,6 +36,10 @@ impl SearchResult {
     /// 全量匹配数，所以 `take(0)` 返回的是「命中总数 + 空 hits」。后端的 total 只能
     /// 从后端拿，因此那几个驱动仍会发一次请求（只取 1 条），拿到后用这个方法把
     /// hits 丢掉。没有它，同样的 `take(0)` 会在内存/ES 上报 N、在其它后端上报 0。
+    ///
+    /// cfg 必须与调用方一致（只有这三个驱动需要它）：Collection/ES 的 `total` 本来就
+    /// 是分页前算的，不需要清 hits。不门控时默认构建会报 `without_hits` never used。
+    #[cfg(any(feature = "meilisearch", feature = "typesense", feature = "algolia"))]
     pub(crate) fn without_hits(self) -> Self {
         Self {
             hits: Vec::new(),
@@ -44,7 +48,10 @@ impl SearchResult {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(feature = "meilisearch", feature = "typesense", feature = "algolia")
+))]
 mod tests {
     use super::*;
 

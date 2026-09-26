@@ -31,7 +31,7 @@ impl ElasticsearchEngine {
     ) -> crate::Result<(reqwest::StatusCode, String)> {
         let mut request = self
             .client
-            .request(method, &format!("{}{}", self.host, path));
+            .request(method, format!("{}{}", self.host, path));
         if let Some(api_key) = &self.api_key {
             request = request.header("Authorization", format!("ApiKey {}", api_key));
         }

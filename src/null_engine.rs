@@ -8,6 +8,12 @@ use crate::{SearchBuilder, SearchDocument, SearchResult};
 /// 空引擎：所有写操作直接成功，搜索返回空结果。用于测试或临时禁用搜索。
 pub struct NullEngine;
 
+impl Default for NullEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NullEngine {
     pub fn new() -> Self {
         Self

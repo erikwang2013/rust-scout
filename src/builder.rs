@@ -180,7 +180,7 @@ impl SearchBuilder {
         true
     }
 
-    pub fn sort_hits(&self, hits: &mut Vec<crate::SearchHit>) {
+    pub fn sort_hits(&self, hits: &mut [crate::SearchHit]) {
         if self.orders.is_empty() {
             hits.sort_by(|a, b| a.id.cmp(&b.id));
             return;
