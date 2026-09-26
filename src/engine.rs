@@ -75,7 +75,7 @@ pub trait Engine: Send + Sync {
     ///
     /// **不带索引信息，语义因引擎而异**：`CollectionEngine` / `DatabaseEngine`
     /// 跨所有索引标记匹配 id 的文档；HTTP 后端做不到跨索引，会返回
-    /// [`ScoutError::Unsupported`]（而不是静默什么都不做）——这些后端请用
+    /// [`crate::ScoutError::Unsupported`]（而不是静默什么都不做）——这些后端请用
     /// [`Self::soft_delete_in`]。
     fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
         let _ = ids;

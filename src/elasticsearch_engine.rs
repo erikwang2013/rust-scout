@@ -1,6 +1,9 @@
 use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
-use crate::query::{build_body, check_bulk_items, is_query_parse_error, parse_search_response};
+use crate::query::{
+    build_body, check_bulk_delete_items, check_bulk_items, is_query_parse_error,
+    parse_search_response,
+};
 use crate::{SearchBuilder, SearchDocument, SearchResult};
 
 pub struct ElasticsearchEngine {
@@ -273,7 +276,8 @@ impl Engine for ElasticsearchEngine {
                     reqwest::Method::POST, path, status, body
                 )));
             }
-            check_bulk_items(&serde_json::from_str(&body)?)
+            // 删除语义：404（文档或索引不存在）视为成功，保持幂等。
+            check_bulk_delete_items(&serde_json::from_str(&body)?)
         })
     }
 

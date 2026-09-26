@@ -25,6 +25,9 @@ pub(crate) fn build_filter_by(builder: &SearchBuilder) -> Option<String> {
         parts.push(format!("{}:=[{}]", field, list));
     }
     for (field, values) in &builder.where_not_ins {
+        if values.is_empty() {
+            continue; // 空 NOT IN 集合 = 无过滤（Collection 语义，与 Algolia 一致）
+        }
         let list = values.iter().map(filter_value).collect::<Vec<_>>().join(", ");
         parts.push(format!("{}:!=[{}]", field, list));
     }

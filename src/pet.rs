@@ -78,11 +78,14 @@ pub fn hint(err: &ScoutError) -> &'static str {
         ScoutError::Http(_) => "连不上后端 —— 服务起来了吗？地址（host）和 API key 对吗？",
         #[cfg(feature = "database")]
         ScoutError::Sqlx(_) => "SQLite 那边出问题了 —— 看看 database.url 指向的库和表结构。",
+        // 必须与 error.rs 里 Backend 变体的 cfg 完全一致：漏掉 xunsearch 会让
+        // `cargo build --features xunsearch` 因 match 不穷尽而编译失败。
         #[cfg(any(
             feature = "elasticsearch",
             feature = "meilisearch",
             feature = "typesense",
-            feature = "algolia"
+            feature = "algolia",
+            feature = "xunsearch"
         ))]
         ScoutError::Backend(_) => "后端拒绝了这次请求 —— 往上翻，它的原始错误信息里有线索。",
         #[cfg(feature = "xunsearch")]

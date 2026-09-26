@@ -140,12 +140,33 @@ pub(crate) fn is_query_parse_error(body: &str) -> bool {
 
 /// 逐条检查 _bulk 响应 items；任一条失败返回 Backend（含该条 id 与错误）。
 pub(crate) fn check_bulk_items(response: &serde_json::Value) -> crate::Result<()> {
+    check_bulk_items_inner(response, false)
+}
+
+/// 删除语义的 bulk 结果检查：`404` 视为成功。
+///
+/// ES 对「索引不存在」的删除项会回 `index_not_found_exception`（带 `error` 键），
+/// 对「文档不存在」回 `result: not_found`。删除必须幂等 —— 与
+/// [`crate::Engine::delete_in`] 及 collection/database/typesense/meilisearch 的
+/// `delete_bulk` 行为对齐；否则同一个「重复删除」在别的驱动上返回 `Ok`、
+/// 在 ES 上返回 `Err(Backend 404)`。其余错误照旧上抛。
+pub(crate) fn check_bulk_delete_items(response: &serde_json::Value) -> crate::Result<()> {
+    check_bulk_items_inner(response, true)
+}
+
+fn check_bulk_items_inner(
+    response: &serde_json::Value,
+    tolerate_404: bool,
+) -> crate::Result<()> {
     if let Some(items) = response.get("items").and_then(|v| v.as_array()) {
         for item in items {
             let entry = item
                 .as_object()
                 .and_then(|m| m.values().next())
                 .unwrap_or(&serde_json::Value::Null);
+            if tolerate_404 && entry.get("status").and_then(|s| s.as_u64()) == Some(404) {
+                continue;
+            }
             if let Some(error) = entry.get("error") {
                 let id = entry
                     .get("_id")
@@ -405,6 +426,23 @@ mod tests {
         assert!(!is_query_parse_error(&mapping_error.to_string()));
         assert!(!is_query_parse_error("not json"));
         assert!(!is_query_parse_error("{}"));
+    }
+
+    #[test]
+    fn bulk_delete_tolerates_404_but_regular_bulk_does_not() {
+        // ES 对「索引不存在」的删除项回 index_not_found_exception（带 error 键）。
+        // delete_in / 其余驱动的 delete_bulk 都是幂等的，删除侧必须同样放行 404，
+        // 否则同一个「重复删除」在别的驱动返回 Ok、在 ES 上返回 Err。
+        let response = serde_json::json!({
+            "items": [
+                {"delete": {"_id": "gone", "status": 404,
+                            "error": {"type": "index_not_found_exception"}}},
+                {"delete": {"_id": "ok", "status": 200, "result": "deleted"}}
+            ]
+        });
+        assert!(check_bulk_delete_items(&response).is_ok());
+        // 写入侧语义不变：同样的 404 项仍然报错
+        assert!(check_bulk_items(&response).is_err());
     }
 
     #[test]

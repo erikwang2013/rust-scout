@@ -245,22 +245,20 @@ impl Engine for AlgoliaEngine {
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
         }
-        // take(0) = 不要结果（Collection 语义）：Algolia 的 hitsPerPage 最小 1，
-        // 原先把 take 钳到 1 会多返回一条。短路后 total 也是 0（CollectionEngine
-        // 那里是「取之前」的全量匹配数）——take(0) 下没有结果可报，不值得为 total
-        // 单发一次查询。
-        if builder.take == Some(0) {
-            return Box::pin(async move { Ok(SearchResult::default()) });
-        }
+        // take(0)：Collection/ES 的 total 是「取之前」的全量匹配数，take(0) 于是
+        // 返回「命中总数 + 空 hits」。total 只能从后端拿，所以请求照发，但只取 1 条
+        // （Algolia 的 length 最小 1），拿到 total 后把 hits 清空。
         let offset = builder.skip.unwrap_or(0);
         let limit = builder.take.unwrap_or(10);
+        let want_none = builder.take == Some(0);
         Box::pin(async move {
             let index = builder.index.as_deref().unwrap_or("default");
             crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, offset, limit);
+            let body = Self::search_body(builder, offset, limit.max(1));
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
-            Ok(Self::parse_search_response(&raw))
+            let result = Self::parse_search_response(&raw);
+            Ok(if want_none { result.without_hits() } else { result })
         })
     }
 
@@ -528,16 +526,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn take_zero_returns_nothing_without_a_request() {
-        // take(0) 的契约是「不要结果」（Collection 语义）。指向不存在的主机：
-        // 真打网络必然失败，返回 Ok 即证明短路发生在请求之前（原先钳到 1 → 多一条）。
-        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
-        let result = engine
-            .search(&SearchBuilder::new("q").take(0))
-            .await
-            .unwrap();
-        assert!(result.hits.is_empty());
-        assert_eq!(result.total, 0);
+    async fn take_zero_keeps_total_and_drops_hits() {
+        // take(0) 的契约（Collection/ES 基准）是「命中总数 + 空 hits」：total 在分页
+        // 之前算出。实现改为照发请求（只取 1 条）再清空 hits，见 result.rs::without_hits。
+        let r = SearchResult {
+            hits: vec![],
+            total: 7,
+            ..SearchResult::default()
+        };
+        let trimmed = r.without_hits();
+        assert!(trimmed.hits.is_empty());
+        assert_eq!(trimmed.total, 7);
     }
 
     #[tokio::test]

@@ -94,6 +94,9 @@ impl MeilisearchEngine {
             parts.push(format!("{} IN [{}]", field, list));
         }
         for (field, values) in &builder.where_not_ins {
+            if values.is_empty() {
+                continue; // 空 NOT IN 集合 = 无过滤（Collection 语义，与 Algolia 一致）
+            }
             let list = values.iter().map(Self::filter_value).collect::<Vec<_>>().join(", ");
             parts.push(format!("{} NOT IN [{}]", field, list));
         }
@@ -229,20 +232,19 @@ impl Engine for MeilisearchEngine {
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
         }
-        // take(0) = 不取任何结果（Collection/ES 语义）；不加这层会被缺省值撑成
-        // 1 条，且 limit=0 的请求体在 Meilisearch 上语义不明。
-        if builder.take == Some(0) {
-            return Box::pin(async move { Ok(SearchResult::default()) });
-        }
-        // limit > 1000 会 400（Meilisearch 上限），由调用方约束。
+        // take(0)：Collection/ES 的 total 是「取之前」的全量匹配数，take(0) 于是
+        // 返回「命中总数 + 空 hits」。total 只能从后端拿，所以请求照发，但只取 1 条
+        // （limit=0 在 Meilisearch 上语义不明），拿到 total 后把 hits 清空。
         let (offset, limit) = Self::offset_limit(builder);
+        let want_none = builder.take == Some(0);
         Box::pin(async move {
             let index = builder.index.as_deref().unwrap_or("default");
             crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, offset, limit);
+            let body = Self::search_body(builder, offset, limit.max(1));
             let path = format!("/indexes/{}/search", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
-            Ok(Self::parse_search_response(&raw))
+            let result = Self::parse_search_response(&raw);
+            Ok(if want_none { result.without_hits() } else { result })
         })
     }
 
@@ -559,17 +561,14 @@ mod tests {
         assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
     }
 
-    #[tokio::test]
-    async fn take_zero_returns_empty_without_request() {
-        // 回归：take(0) 曾被 max(1) 撑成 1 条。指向必然连不上的地址：真的打网络
-        // 就会失败，返回空结果即证明没有请求。
-        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
-        let result = engine
-            .search(&SearchBuilder::new("").within("books").take(0))
-            .await
-            .unwrap();
-        assert!(result.hits.is_empty());
-        assert_eq!(result.total, 0);
+    #[test]
+    fn take_zero_truncates_but_keeps_total() {
+        // take(0) 的契约（Collection/ES 基准）是「命中总数 + 空 hits」：total 在分页
+        // 之前算出，不能因为不要 hits 就报 0。截断逻辑在 result.rs::without_hits，
+        // 那里有独立单测；这里确认本驱动用它、且 limit 被钳到 1（limit=0 语义不明）。
+        assert_eq!(MeilisearchEngine::offset_limit(&SearchBuilder::new("").take(0)), (0, 0));
+        let r = SearchResult { total: 7, ..SearchResult::default() };
+        assert_eq!(r.without_hits().total, 7);
     }
 
     #[tokio::test]

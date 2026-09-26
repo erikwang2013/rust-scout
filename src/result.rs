@@ -29,4 +29,37 @@ impl SearchResult {
     pub fn ids(&self) -> Vec<String> {
         self.hits.iter().map(|hit| hit.id.clone()).collect()
     }
+
+    /// 清空 `hits`，保留 `total` 等其余字段。
+    ///
+    /// 供 `take(0)` 的契约对齐使用：Collection 与 ES 的 `total` 是「分页之前」的
+    /// 全量匹配数，所以 `take(0)` 返回的是「命中总数 + 空 hits」。后端的 total 只能
+    /// 从后端拿，因此那几个驱动仍会发一次请求（只取 1 条），拿到后用这个方法把
+    /// hits 丢掉。没有它，同样的 `take(0)` 会在内存/ES 上报 N、在其它后端上报 0。
+    pub(crate) fn without_hits(self) -> Self {
+        Self {
+            hits: Vec::new(),
+            ..self
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_hits_keeps_total() {
+        let result = SearchResult {
+            hits: vec![SearchHit {
+                id: "a".to_string(),
+                ..SearchHit::default()
+            }],
+            total: 42,
+            ..SearchResult::default()
+        };
+        let cleared = result.without_hits();
+        assert!(cleared.hits.is_empty());
+        assert_eq!(cleared.total, 42, "total 是分页前的全量匹配数，不能被清掉");
+    }
 }

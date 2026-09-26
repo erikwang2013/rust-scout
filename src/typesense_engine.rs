@@ -144,14 +144,16 @@ impl Engine for TypesenseEngine {
         })
     }
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
-        // take(0) = 不取任何结果（Collection/ES 语义）；不加这层会被缺省值撑成 1 条。
+        // take(0)：Collection/ES 的 total 是「取之前」的全量匹配数，take(0) 于是
+        // 返回「命中总数 + 空 hits」。total 只能从后端拿，所以请求照发，但只取 1 条
+        // （limit=0 的语义后端不一），拿到 total 后把 hits 清空。
         // 只在 search 上判：paginate 的 take 一律由 per_page 覆盖（同 Collection）。
-        if builder.take == Some(0) {
-            return Box::pin(async move { Ok(SearchResult::default()) });
-        }
-        // skip 精确映射到 offset，不折算成页（页会丢掉 skip % take 的余数）。
         let (offset, limit) = offset_limit(builder);
-        Box::pin(async move { self.search_page(builder, offset, limit).await })
+        let want_none = builder.take == Some(0);
+        Box::pin(async move {
+            let result = self.search_page(builder, offset, limit.max(1)).await?;
+            Ok(if want_none { result.without_hits() } else { result })
+        })
     }
     fn paginate<'a>(
         &'a self,
@@ -254,16 +256,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn take_zero_returns_empty_without_request() {
-        // 回归：take(0) 曾被 max(1) 撑成 1 条。指向必然连不上的地址：真的打网络
-        // 就会失败，返回空结果即证明没有请求。
-        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
-        let result = engine
-            .search(&SearchBuilder::new("").within("books").take(0))
-            .await
-            .unwrap();
-        assert!(result.hits.is_empty());
-        assert_eq!(result.total, 0);
+    async fn take_zero_keeps_total_and_drops_hits() {
+        // take(0) 的契约（Collection/ES 基准）是「命中总数 + 空 hits」：total 在分页
+        // 之前算出。实现改为照发请求（只取 1 条）再清空 hits，见 result.rs::without_hits。
+        let r = SearchResult {
+            hits: vec![],
+            total: 7,
+            ..SearchResult::default()
+        };
+        let trimmed = r.without_hits();
+        assert!(trimmed.hits.is_empty());
+        assert_eq!(trimmed.total, 7);
     }
 
     #[tokio::test]

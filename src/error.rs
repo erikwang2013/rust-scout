@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+/// 各变体带 `cfg` 门控。**改动任何一条 `cfg` 时必须同步 `pet.rs::hint()` 的
+/// 匹配臂**——两处 cfg 不一致会让 `hint()` 的 match 在某个 feature 组合下不穷尽，
+/// 例如 `--features xunsearch`（`Backend` 存在但那个臂被门控掉）会直接编译失败。
 #[derive(Debug, Error)]
 pub enum ScoutError {
     #[error("invalid index name `{0}`: must be non-empty, contain no whitespace, contain no '/', and not start with '.'")]
