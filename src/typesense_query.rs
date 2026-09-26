@@ -55,8 +55,29 @@ fn build_sort_by(builder: &SearchBuilder) -> Option<String> {
     Some(parts.join(","))
 }
 
+/// `skip`/`take` → `offset`/`limit`。`skip` 精确映射到 `offset`，**不**折算成页：
+/// 页只能表达页对齐的起点，`.skip(15).take(10)` 会丢掉 `15 % 10` 的余数，
+/// 返回 10–19 而不是 Collection 的 15–24（客户端按偏移翻页会重复/漏行）。
+/// `take(0)` 由调用方短路，这里缺省 10。
+pub(crate) fn offset_limit(builder: &SearchBuilder) -> (usize, usize) {
+    (builder.skip.unwrap_or(0), builder.take.unwrap_or(10))
+}
+
+/// `page`/`per_page` → `offset`/`limit`：page N 即 offset `(N-1)*per_page`，
+/// 与 `CollectionEngine::paginate` 的页语义一致。
+pub(crate) fn page_offset(page: usize, per_page: usize) -> (usize, usize) {
+    let per_page = per_page.max(1);
+    (
+        page.max(1).saturating_sub(1).saturating_mul(per_page),
+        per_page,
+    )
+}
+
 /// GET 搜索 query 参数；q 为空时省略 q/query_by（Typesense 空串匹配全部）。
-pub(crate) fn search_params(builder: &SearchBuilder, page: usize, per_page: usize) -> Vec<(String, String)> {
+/// 分页用 `offset`/`limit`（`page`/`per_page` 的替代写法，两者不可混用）：
+/// 后者只能表达页对齐的起点，会丢掉 `skip` 的余数。
+/// `limit` > 250 会报错（`per_page` 上限），由调用方约束。
+pub(crate) fn search_params(builder: &SearchBuilder, offset: usize, limit: usize) -> Vec<(String, String)> {
     let mut params = Vec::new();
     if !builder.query.is_empty() {
         params.push(("q".to_string(), builder.query.clone()));
@@ -67,8 +88,8 @@ pub(crate) fn search_params(builder: &SearchBuilder, page: usize, per_page: usiz
     if let Some(filter) = build_filter_by(builder) {
         params.push(("filter_by".to_string(), filter));
     }
-    params.push(("per_page".to_string(), per_page.to_string()));
-    params.push(("page".to_string(), page.to_string()));
+    params.push(("limit".to_string(), limit.to_string()));
+    params.push(("offset".to_string(), offset.to_string()));
     if let Some(sort) = build_sort_by(builder) {
         params.push(("sort_by".to_string(), sort));
     }
@@ -185,9 +206,30 @@ mod tests {
         assert_eq!(map["q"], "needle");
         assert_eq!(map["query_by"], "title,body");
         assert_eq!(map["filter_by"], "active:=true && __soft_deleted:!=true");
-        assert_eq!(map["per_page"], "10");
-        assert_eq!(map["page"], "2");
+        assert_eq!(map["offset"], "2");
+        assert_eq!(map["limit"], "10");
+        // page/per_page 只能表达页对齐的起点（且与 offset 互斥），不再使用。
+        assert!(!map.contains_key("page"));
+        assert!(!map.contains_key("per_page"));
         assert_eq!(map["sort_by"], "price:desc");
+    }
+
+    #[test]
+    fn offset_limit_keeps_skip_remainder() {
+        // 回归：skip 曾按 skip/per_page+1 折算成页，15 % 10 的余数被丢掉，
+        // .skip(15).take(10) 返回 10–19 而不是 Collection 的 15–24。
+        assert_eq!(offset_limit(&SearchBuilder::new("").skip(15).take(10)), (15, 10));
+        assert_eq!(offset_limit(&SearchBuilder::new("").skip(25).take(7)), (25, 7));
+        assert_eq!(offset_limit(&SearchBuilder::new("")), (0, 10));
+    }
+
+    #[test]
+    fn page_offset_matches_collection_page_semantics() {
+        // paginate 的页语义不变：page N == offset (N-1)*per_page，参数钳到合法范围。
+        assert_eq!(page_offset(1, 10), (0, 10));
+        assert_eq!(page_offset(2, 10), (10, 10));
+        assert_eq!(page_offset(0, 0), (0, 1));
+        assert_eq!(page_offset(3, 0), (2, 1));
     }
 
     #[test]

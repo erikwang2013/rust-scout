@@ -5,7 +5,8 @@
 //! （cmd u8、arg1 u8、arg2 u8、blen1 u8、blen u32le）+ buf + buf1
 //! （buf 在前 buf1 在后）。cmd 0-127 收响应；>=128 为静默命令（不回包），
 //! 客户端须与下一条普通命令同一次 write 发出。
-#![allow(dead_code)] // 协议纯函数 API：部分仅被本模块测试消费
+#![allow(dead_code)] // 协议常量/纯函数：parse_packet、CMD_INDEX_EXDATA、CMD_DELETE_PROJECT、
+                     // OK_PROJECT_DEL 仅被本模块测试消费（引擎侧走直接的 socket 读写）
 
 use std::collections::HashMap;
 

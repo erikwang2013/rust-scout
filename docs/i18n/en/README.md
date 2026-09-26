@@ -113,13 +113,35 @@ rust-scout/
 > The `[feature]` tag marks the Cargo feature a driver needs. When it is off,
 > `EngineManager` returns `ScoutError::Unsupported` instead of silently degrading.
 
+### Driver Capability Differences
+
+The default in-memory driver is the semantic baseline. Where a backend cannot do
+something, it **says so explicitly** rather than silently returning wrong results:
+
+| Driver | Limitation | Behaviour |
+|--------|-----------|-----------|
+| Algolia | Sorting requires pre-built replica indices; it cannot be chosen per query | `order_by` is **ignored** (results still return, order is just unspecified) |
+| XunSearch | No protocol command for `where_in` / `where_not_in` | returns `Unsupported`; use `where_field` |
+| XunSearch | Server supports a single sort field only | multiple `order_by` returns `Unsupported` |
+| XunSearch | Soft delete not implemented | `soft_delete` / `only_trashed` return `Unsupported` |
+| XunSearch | Creating an index needs a field-scheme ini | `create_index` returns `Unsupported` (pass an ini to `XunSearchEngine::new`) |
+
+Two deliberate semantic alignments:
+
+- **When ES receives malformed query syntax** (`"("`, `"foo AND"`) it returns an
+  empty result rather than an error — the in-memory driver does a substring match
+  for the same input, and a 400 would break "swap backends, keep your code".
+- **`delete` and `soft_delete` carry no index information**, so whether they span
+  indexes depends on the backend. To target one index, always use
+  `delete_in` / `soft_delete_in`.
+
 ## Quick Start
 
 ### 1. Add the dependency
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # example only
 ```
 
@@ -348,9 +370,13 @@ $ cargo run --example pet
        \_________________/
          \   ~~~~~~   /
           \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+        +----------------+
+        |  [] [] [] []   |
+        |  [] [] [] []   |
+        +----------------+
+           ||      ||
+           ||      ||
+          (__)    (__)
 
 
    ,^.     ,^.     ,^.     ,^.

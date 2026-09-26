@@ -31,7 +31,21 @@ pub trait Engine: Send + Sync {
     fn map_ids(&self, result: &SearchResult) -> Vec<String> {
         result.ids()
     }
-    fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()>;
+    /// 刷新索引，让已写入的文档对搜索可见。
+    ///
+    /// **不是清空索引** —— 要删除索引用 [`Self::delete_index`]。默认实现是
+    /// no-op（校验索引名后直接返回）：除 ES 外所有后端写入即对查询可见，
+    /// 没有「刷新」这一步。只有 ES 需要覆写成 `_refresh`。
+    ///
+    /// 曾有三个驱动把它接到了清空接口上（Meilisearch `delete-all`、
+    /// Typesense 删集合、Algolia `/clear`），而 README 的生命周期示例在
+    /// update 与 search 之间调用 flush —— 照文档跑一遍就会把索引删空。
+    fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            crate::validate_index_name(index)?;
+            Ok(())
+        })
+    }
     fn create_index<'a>(
         &'a self,
         index: &'a str,

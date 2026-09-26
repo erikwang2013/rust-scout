@@ -1,39 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 470" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="petTitle petDesc">
   <title id="petTitle">Mascota del proyecto rust-scout: Scout el Sabueso de Búsqueda</title>
-  <desc id="petDesc">Un perro de orejas caídas con pañuelo scout azul olfatea una pila de documentos delante; una lupa flota sobre los documentos, una línea coincidente está resaltada y detrás queda un rastro de huellas.</desc>
+  <desc id="petDesc">Un sabueso ámbar con pañuelo scout azul: proporciones chibi, cabeza grande sobre un cuerpo pequeño, cuatro patas cortas y gruesas con las patas bien visibles; orejas largas y caídas, hocico al frente olfateando; la bolsa de lona cruzada al pecho lleva ocho pequeñas insignias de colores, los ocho backends intercambiables; el rastro de olor va del hocico al documento de la derecha, una lupa rodea la línea acertada; detrás queda un rastro de huellas.</desc>
 
   <defs>
     <style>
       .title { font-size: 24px; font-weight: 700; fill: #0f172a; }
       .sub   { font-size: 12.5px; fill: #64748b; }
+
+      /* 猎犬配色：琥珀系（与架构图 data 层同源），不引入第二套色板 */
+      .fur   { fill: #f7c873; }
+      .fur-m { fill: #eaa94f; }
+      .fur-d { fill: #d18b33; }
+      .fur-l { fill: #fbe3b4; }
+      .muzzle{ fill: #fde9c9; }
+      .ink   { fill: #0f172a; }
+
+      /* 描边族：与填充类组合使用（s = 主轮廓，s2 = 次要轮廓） */
+      .s     { stroke: #b06f22; stroke-width: 3;   stroke-linejoin: round; stroke-linecap: round; }
+      .s2    { stroke: #b06f22; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+
+      .scarf { fill: #2563eb; }
+      .scarf-d { fill: #1d4ed8; }
+
+      /* 侦察挎包：帆布色 + 石板灰轮廓，和猎犬的棕色描边区分开 */
+      .bag   { fill: #e2e8f0; stroke: #64748b; stroke-width: 2; stroke-linejoin: round; }
+      .flap  { fill: #cbd5e1; }
+      .strap { stroke: #64748b; stroke-width: 11; stroke-linecap: round; }
+
+      .paw   { fill: currentColor; }
+      .sniff { fill: none; stroke: #94a3b8; stroke-width: 2.5; stroke-linecap: round; }
+
       .card  { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
       .line  { fill: #e2e8f0; }
       .line-hi { fill: #f59e0b; }
       .head  { fill: #cbd5e1; }
-      /* paleta del sabueso: ámbar (reutiliza el color de la capa data del diagrama), fiel a la paleta del sitio */
-      .fur   { fill: #f7c873; }
-      .fur-m { fill: #eaa94f; }
-      .fur-d { fill: #d18b33; }
-      .muzzle{ fill: #fde9c9; }
-      .ink   { fill: #0f172a; }
-      .scarf { fill: #2563eb; }
-      .scarf-d { fill: #1d4ed8; }
       .glass { fill: #dbeafe; fill-opacity: 0.45; }
-      .rim   { fill: none; stroke: #2563eb; stroke-width: 11; }
-      .handle{ stroke: #2563eb; stroke-width: 15; stroke-linecap: round; }
-      .paw   { fill: currentColor; }
+      .rim   { fill: none; stroke: #2563eb; stroke-width: 9; }
+      .handle{ stroke: #2563eb; stroke-width: 13; stroke-linecap: round; }
       .badge { fill: #10b981; }
-      /* familia de trazos: se combina con las clases de relleno */
-      .s     { stroke: #b06f22; stroke-width: 3; }
-      .s2    { stroke: #b06f22; stroke-width: 2.2; }
-      .brow  { fill: none; stroke: #d18b33; stroke-width: 4; stroke-linecap: round; }
-      .tail  { fill: none; stroke: #eaa94f; stroke-width: 15; stroke-linecap: round; }
-      .sniff { fill: none; stroke: #94a3b8; stroke-width: 2.5; stroke-linecap: round; }
+
       .name  { font-size: 16px; font-weight: 700; fill: #0f172a; }
       .role  { font-size: 11.5px; fill: #64748b; }
     </style>
 
-    <!-- huella: una forma reutilizada cuatro veces, el color lo pone el color del <use> -->
+    <!-- 爪印：一个形状复用四次，颜色由 <use> 的 color 决定 -->
     <g id="pawMark">
       <ellipse cx="0" cy="5" rx="7.5" ry="6" class="paw"/>
       <ellipse cx="-8.5" cy="-5" rx="3.4" ry="4" class="paw"/>
@@ -43,93 +53,174 @@
     </g>
   </defs>
 
-  <text x="280" y="40" text-anchor="middle" class="title">Mascota de rust-scout</text>
-  <text x="280" y="63" text-anchor="middle" class="sub">Sabueso Scout · olfatea documentos, rastrea índices</text>
+  <text x="280" y="38" text-anchor="middle" class="title">rust-scout: el Sabueso de Búsqueda</text>
+  <text x="280" y="60" text-anchor="middle" class="sub">Sabueso Scout · 8 backends, un solo Engine trait — código de negocio intacto</text>
 
+  <!-- ============ 地面投影：一只狗、一沓纸 ============ -->
+  <ellipse cx="130" cy="366" rx="90" ry="7" fill="#64748b" opacity="0.10"/>
+  <ellipse cx="462" cy="362" rx="76" ry="7" fill="#64748b" opacity="0.10"/>
 
-  <!-- ============ rastro de huellas: de abajo a la izquierda hasta las patas ============ -->
-  <use href="#pawMark" transform="translate(150,388) rotate(-18)" color="#d18b33" opacity="0.75"/>
-  <use href="#pawMark" transform="translate(108,404) rotate(-8)"  color="#eaa94f" opacity="0.55"/>
-  <use href="#pawMark" transform="translate(64,412)  rotate(6)"   color="#f0c37f" opacity="0.4"/>
-  <use href="#pawMark" transform="translate(24,406)  rotate(14)"  color="#f7d9a8" opacity="0.28"/>
+  <!-- ============ 爪印小径：从画面左下延伸至猎犬后脚边 ============ -->
+  <use href="#pawMark" transform="translate(96,382) rotate(-16) scale(1)"    color="#d18b33" opacity="0.80"/>
+  <use href="#pawMark" transform="translate(68,394) rotate(-6)  scale(0.94)" color="#eaa94f" opacity="0.62"/>
+  <use href="#pawMark" transform="translate(38,402) rotate(6)   scale(0.86)" color="#f0c37f" opacity="0.44"/>
+  <use href="#pawMark" transform="translate(10,398) rotate(16)  scale(0.78)" color="#f7d9a8" opacity="0.30"/>
 
-  <!-- ============ el sabueso (coordenadas locales: origen en el centro de la cabeza) ============ -->
-  <g transform="translate(198,190)">
+  <!-- ============ 气味轨迹：鼻尖 → 文档，由灰转琥珀 ============ -->
+  <path class="sniff" opacity="0.85" d="M 342,190 Q 354,204 344,218"/>
+  <path class="sniff" opacity="0.62" d="M 344,206 Q 362,222 350,240"/>
+  <path class="sniff" opacity="0.42" d="M 348,226 Q 372,242 360,264"/>
+  <circle cx="368" cy="220" r="4.0" fill="#94a3b8" opacity="0.60"/>
+  <circle cx="382" cy="236" r="5.0" fill="#94a3b8" opacity="0.72"/>
+  <circle cx="394" cy="250" r="6.0" fill="#f0b048" opacity="0.80"/>
+  <circle cx="406" cy="266" r="7.0" fill="#f59e0b" opacity="0.95"/>
 
-    <!-- cola (detrás; pasa abajo-izquierda del cuerpo para esquivar las orejas caídas) -->
-    <path class="tail" d="M -48,92 C -94,90 -116,70 -106,44"/>
-
-    <!-- orejas largas caídas (tras la cabeza, simétricas; se abren más allá de la base para que se vean) -->
-    <path class="fur-d s" d="M -28,-50 C -78,-64 -112,-20 -94,30 C -84,56 -58,58 -46,34 C -38,14 -40,-20 -28,-50 Z"/>
-    <path class="fur-d s" d="M  28,-50 C  78,-64  112,-20  94,30 C  84,56  58,58  46,34 C  38,14  40,-20  28,-50 Z"/>
-
-    <!-- mechón sobre la cabeza (delante; su base queda oculta por la cabeza) -->
-    <path class="fur-m" d="M -17,-47 Q -10,-73 0,-50 Q 8,-71 18,-45 Z"/>
-
-    <!-- cuerpo -->
-    <ellipse cx="0" cy="92" rx="52" ry="50" class="fur s"/>
-
-    <!-- patas + plantas -->
-    <rect x="-31" y="116" width="20" height="48" rx="10" class="fur s"/>
-    <rect x="11"  y="116" width="20" height="48" rx="10" class="fur s"/>
-    <ellipse cx="-21" cy="160" rx="13" ry="7" class="fur-m s2"/>
-    <ellipse cx="21"  cy="160" rx="13" ry="7" class="fur-m s2"/>
-
-    <!-- cabeza -->
-    <ellipse cx="0" cy="0" rx="58" ry="54" class="fur s"/>
-
-    <!-- hocico (algo pequeño, para no comerse la oreja derecha) -->
-    <ellipse cx="32" cy="28" rx="32" ry="25" class="muzzle s2"/>
-    <ellipse cx="56" cy="17" rx="13" ry="10.5" class="ink"/>
-    <ellipse cx="51" cy="13" rx="3.8" ry="2.5" fill="#ffffff" opacity="0.55"/>
-    <path d="M 47,38 Q 57,47 67,37" fill="none" stroke="#b06f22" stroke-width="2.2" stroke-linecap="round"/>
-
-    <!-- ojos + brillos -->
-    <circle cx="-20" cy="-16" r="12" class="ink"/>
-    <circle cx="18"  cy="-20" r="12" class="ink"/>
-    <circle cx="-16" cy="-20" r="4.5" fill="#ffffff" opacity="0.92"/>
-    <circle cx="22"  cy="-24" r="4.5" fill="#ffffff" opacity="0.92"/>
-
-    <!-- cejas -->
-    <path class="brow" d="M -34,-38 Q -22,-47 -10,-39"/>
-    <path class="brow" d="M   4,-42 Q  16,-51  28,-43"/>
-
-    <!-- pañuelo scout (dibujado tras la cabeza, apoyado en el cuello) -->
-    <path class="scarf"   d="M -46,44 Q 0,66 46,44 L 46,58 Q 0,80 -46,58 Z"/>
-    <path class="scarf-d" d="M -13,66 L 13,66 L 4,106 L -4,106 Z"/>
-    <path class="scarf"   d="M -13,62 L 13,62 L 0,82 Z"/>
-
-    <!-- ondas de olfateo: apuntan a los documentos de la derecha -->
-    <path class="sniff" opacity="0.75" d="M 78,-10 Q 88,-2 78,8"/>
-    <path class="sniff" opacity="0.5"  d="M 88,-16 Q 102,-2 88,14"/>
-    <path class="sniff" opacity="0.3"  d="M 98,-22 Q 116,-2 98,20"/>
+  <!-- ============ 被嗅到的文档：斜插在地上，命中行被放大镜圈住 ============ -->
+  <g transform="rotate(-3 466 297)">
+    <rect x="386" y="228" width="142" height="122" rx="10" class="card" stroke="#e2e8f0"/>
+    <rect x="394" y="236" width="144" height="122" rx="10" class="card"/>
+    <rect x="412" y="254" width="62"  height="10" rx="5"   class="head"/>
+    <rect x="412" y="276" width="100" height="7"  rx="3.5" class="line"/>
+    <rect x="412" y="292" width="86"  height="7"  rx="3.5" class="line"/>
+    <rect x="412" y="308" width="104" height="7"  rx="3.5" class="line-hi"/>
+    <rect x="412" y="324" width="72"  height="7"  rx="3.5" class="line"/>
   </g>
 
-  <!-- ============ la pila de documentos olfateada ============ -->
-  <g transform="rotate(-3 430 312)">
-    <rect x="352" y="262" width="155" height="100" rx="10" class="card" stroke="#e2e8f0"/>
+  <!-- 命中徽标 -->
+  <circle cx="526" cy="240" r="15" class="badge"/>
+  <path d="M 518,240 L 524,247 L 535,233" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 放大镜：圈住那一行命中 -->
+  <circle cx="416" cy="288" r="40" class="glass"/>
+  <path class="handle" d="M 441,320 L 484,352"/>
+  <circle cx="416" cy="288" r="40" class="rim"/>
+
+    <!-- ============ 猎犬本体（局部坐标：原点 = 脚掌落地点，地面 y=0） ============
+       Q 版比例：头连耳约占全身高的 45%，身体宽约为头宽的 1.3 倍，
+       颈短（头几乎直接坐在身上），四条短粗腿，每只脚都有脚掌与脚趾。 -->
+  <g transform="translate(150,364)">
+
+    <!-- 尾巴：粗根细梢，向左后方甩出上扬；弧线走在垂耳左外侧，免得被耳朵吃掉 -->
+    <path class="fur-m s2" d="M -34,-70
+      C -50,-78 -62,-88 -66,-98
+      C -69,-106 -64,-113 -57,-110
+      C -50,-107 -48,-99 -50,-90
+      C -52,-82 -46,-73 -34,-70 Z"/>
+
+    <!-- 远侧两条腿：压深一档，退到身体后面 -->
+    <g class="fur-d">
+      <rect x="-47" y="-52" width="18" height="40" rx="7"/>
+      <ellipse cx="-38" cy="-8" rx="11" ry="8"/>
+      <circle cx="-29" cy="-14" r="3.2"/>
+      <circle cx="-27" cy="-8"  r="3.2"/>
+      <circle cx="-29" cy="-2"  r="3.2"/>
+      <rect x="9" y="-52" width="18" height="40" rx="7"/>
+      <ellipse cx="18" cy="-8" rx="11" ry="8"/>
+      <circle cx="27" cy="-14" r="3.2"/>
+      <circle cx="29" cy="-8"  r="3.2"/>
+      <circle cx="27" cy="-2"  r="3.2"/>
+    </g>
+
+    <!-- 近侧两条腿：与远侧同形，浅一档压在前面 -->
+    <g class="fur s">
+      <rect x="-23" y="-52" width="18" height="40" rx="7"/>
+      <ellipse cx="-14" cy="-8" rx="11" ry="8"/>
+      <circle cx="-5" cy="-14" r="3.2"/>
+      <circle cx="-3" cy="-8"  r="3.2"/>
+      <circle cx="-5" cy="-2"  r="3.2"/>
+      <rect x="33" y="-52" width="18" height="40" rx="7"/>
+      <ellipse cx="42" cy="-8" rx="11" ry="8"/>
+      <circle cx="51" cy="-14" r="3.2"/>
+      <circle cx="53" cy="-8"  r="3.2"/>
+      <circle cx="51" cy="-2"  r="3.2"/>
+    </g>
+
+    <!-- 身体：小而紧凑的椭圆 -->
+    <path class="fur s" d="M -34,-80
+      C -12,-86 24,-86 42,-77
+      C 53,-70 55,-52 47,-42
+      C 39,-33 12,-29 -8,-31
+      C -30,-33 -49,-41 -49,-55
+      C -49,-69 -45,-78 -34,-80 Z"/>
+
+    <!-- 体积暗示：浅色胸口 + 胸侧与臀部的软阴影 -->
+    <ellipse cx="34" cy="-54" rx="17" ry="11" class="fur-l" opacity="0.7"/>
+    <path class="fur-m" opacity="0.45" d="M 38,-78 C 45,-70 46,-58 41,-48 C 35,-39 26,-34 16,-32 C 27,-40 34,-50 36,-60 C 38,-70 37,-75 34,-80 Z"/>
+    <path class="fur-m" opacity="0.4" d="M -49,-54 C -49,-67 -44,-76 -34,-80 C -42,-74 -45,-64 -45,-54 C -45,-44 -41,-36 -34,-31 C -44,-34 -49,-43 -49,-54 Z"/>
+
+    <!-- 侦察挎包：翻盖上缘贴着背线，包身挂在体侧，八枚徽章分两排 -->
+    <rect x="-32" y="-82" width="64" height="17" rx="7" class="bag"/>
+    <rect x="-6"  y="-79" width="12" height="9"  rx="2.4" fill="#f59e0b" stroke="#64748b" stroke-width="1.6"/>
+    <rect x="-30" y="-66" width="60" height="34" rx="5" class="bag"/>
+    <g>
+      <rect x="-26"   y="-62" width="12" height="10" rx="2.4" fill="#2563eb"/>
+      <rect x="-12.5" y="-62" width="12" height="10" rx="2.4" fill="#10b981"/>
+      <rect x="1"     y="-62" width="12" height="10" rx="2.4" fill="#f59e0b"/>
+      <rect x="14.5"  y="-62" width="12" height="10" rx="2.4" fill="#64748b"/>
+      <rect x="-26"   y="-50" width="12" height="10" rx="2.4" fill="#10b981"/>
+      <rect x="-12.5" y="-50" width="12" height="10" rx="2.4" fill="#f59e0b"/>
+      <rect x="1"     y="-50" width="12" height="10" rx="2.4" fill="#64748b"/>
+      <rect x="14.5"  y="-50" width="12" height="10" rx="2.4" fill="#2563eb"/>
+    </g>
+
+    <!-- 远侧垂耳：落在头后面，从左下露出一档 -->
+    <path class="fur-d s2" d="M 8,-147
+      C -10,-153 -25,-143 -27,-123
+      C -29,-107 -21,-99 -13,-103
+      C -5,-107 -3,-118 -5,-130
+      C -6,-139 -1,-144 8,-147 Z"/>
+
+    <!-- 侦察兵领巾：绕过颈根，上缘被头挡住，下缘落在胸口，结与飘带垂在喉前 -->
+    <path class="scarf-d" d="M -30,-100 C -10,-96 12,-94 32,-95 L 27,-83 C 8,-82 -12,-85 -32,-89 Z"/>
+    <path class="scarf"   d="M -30,-107 C -10,-104 12,-102 30,-103 L 27,-94 C 8,-93 -12,-96 -32,-99 Z"/>
+    <path class="scarf"   d="M 28,-102 C 30,-88 30,-76 28,-67 L 41,-65 C 44,-76 44,-90 42,-104 Z"/>
+    <path class="scarf-d" d="M 41,-103 C 44,-90 46,-80 47,-71 L 58,-76 C 56,-84 52,-94 50,-105 Z"/>
+    <path class="scarf-d" d="M 26,-105 C 33,-100 41,-98 49,-100 C 45,-106 34,-109 26,-105 Z"/>
+
+    <!-- 头：大颅骨 + 短口鼻，一条连续轮廓 -->
+    <path class="fur s" d="M -26,-120
+      C -30,-142 -14,-154 6,-154
+      C 28,-154 44,-144 46,-126
+      C 47,-119 51,-115 58,-112
+      C 65,-109 67,-101 61,-96
+      C 53,-90 40,-91 30,-95
+      C 20,-99 8,-102 -2,-105
+      C -16,-109 -25,-111 -26,-120 Z"/>
+
+    <!-- 口鼻：浅色吻部 + 鼻头 + 嘴线 -->
+    <path class="muzzle s2" d="M 41,-123
+      C 49,-119 56,-115 61,-111
+      C 66,-107 66,-100 60,-96
+      C 53,-92 45,-93 41,-97
+      C 37,-102 37,-117 41,-123 Z"/>
+    <ellipse cx="62" cy="-105" rx="8" ry="7" class="ink" transform="rotate(-12 62 -105)"/>
+    <ellipse cx="59.6" cy="-107.4" rx="2.4" ry="1.8" fill="#ffffff" opacity="0.55"/>
+    <path d="M 54,-94 C 59,-89 63,-89 66,-93" fill="none" stroke="#b06f22" stroke-width="2.2" stroke-linecap="round"/>
+
+    <!-- 大眼睛 + 眉毛（Q 版：眼睛相对头更大） -->
+    <ellipse cx="22"  cy="-126" rx="11"  ry="11.5" class="ink"/>
+    <ellipse cx="0"   cy="-130" rx="9"   ry="9.5"  class="ink"/>
+    <circle  cx="26"  cy="-130" r="4"   fill="#ffffff" opacity="0.92"/>
+    <circle  cx="3.5" cy="-134" r="3.2" fill="#ffffff" opacity="0.92"/>
+    <path d="M 12,-143 Q 22,-150 33,-145" fill="none" stroke="#d18b33" stroke-width="4"   stroke-linecap="round"/>
+    <path d="M -11,-147 Q -1,-154 9,-150" fill="none" stroke="#d18b33" stroke-width="3.4" stroke-linecap="round"/>
+
+    <!-- 近侧垂耳（头前面）：内耳压深一档，耳根起自头顶 -->
+    <path class="fur s2" d="M -2,-151
+      C -24,-158 -40,-146 -42,-124
+      C -44,-106 -36,-96 -26,-100
+      C -16,-104 -13,-116 -15,-129
+      C -17,-141 -12,-148 -2,-151 Z"/>
+    <path class="fur-d" d="M -6,-143
+      C -24,-149 -36,-138 -38,-122
+      C -39,-108 -33,-100 -26,-104
+      C -19,-108 -18,-117 -20,-128
+      C -21,-137 -16,-141 -6,-143 Z"/>
   </g>
-  <rect x="344" y="270" width="155" height="100" rx="10" class="card"/>
-  <rect x="362" y="290" width="88"  height="9" rx="4" class="head"/>
-  <rect x="362" y="308" width="120" height="6" rx="3" class="line"/>
-  <rect x="362" y="322" width="120" height="6" rx="3" class="line"/>
-  <rect x="362" y="336" width="76"  height="6" rx="3" class="line-hi"/>
-  <rect x="362" y="350" width="104" height="6" rx="3" class="line"/>
 
-  <!-- insignia de acierto -->
-  <circle cx="499" cy="268" r="16" class="badge"/>
-  <path d="M 491,268 L 497,275 L 508,261" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
-
-  <!-- ============ lupa: suspendida sobre los documentos ============ -->
-  <circle cx="420" cy="250" r="46" class="glass"/>
-  <path class="handle" d="M 452,282 L 488,318"/>
-  <circle cx="420" cy="250" r="46" class="rim"/>
-
-  <!-- ============ placa de nombre ============ -->
-  <rect x="146" y="404" width="196" height="42" rx="21" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
-  <circle cx="172" cy="425" r="11" class="fur"/>
-  <circle cx="172" cy="425" r="11" fill="none" stroke="#b06f22" stroke-width="2"/>
-  <ellipse cx="172" cy="429" rx="4" ry="3" class="ink"/>
-  <text x="192" y="421" class="name">Scout</text>
-  <text x="192" y="437" class="role">Sabueso de Búsqueda</text>
+<!-- ============ 名牌 ============ -->
+  <rect x="150" y="402" width="200" height="44" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <use href="#pawMark" transform="translate(178,424) scale(1.15)" color="#eaa94f"/>
+  <text x="198" y="420" class="name">Scout</text>
+  <text x="198" y="437" class="role">Sabueso de Búsqueda</text>
 </svg>

@@ -11,7 +11,9 @@ use crate::xunsearch_query::*;
 use crate::{SearchBuilder, SearchDocument, SearchHit, SearchResult};
 
 pub struct XunSearchEngine {
-    project: String,
+    /// 项目名（CMD_USE 的 buf）：校验通过的值在 `Ok`，被拒的原始名留在 `Err`
+    /// 仅供报错（构造签名 infallible，见 [`Self::new`]）。
+    project: std::result::Result<String, String>,
     index_addr: String,
     search_addr: String,
     scheme: Mutex<FieldScheme>,
@@ -22,19 +24,35 @@ impl XunSearchEngine {
     /// `host` 形如 `"127.0.0.1:8383"`（index 端口；search 取 port+1）。`ini_path`
     /// 为字段方案 ini（vno 是客户端约定，update 与 search 必须用同一份）；缺省
     /// 用动态方案（id vno=0，其余字段 index=both 全字符串）。
+    ///
+    /// `project` 与库名同进 CMD_USE 包、同是服务端路径片段，因此走同一套
+    /// [`crate::validate_index_name`]：`"../../other_project"` 会跳出项目 home。
+    /// 签名是公共 API 不能返回 `Result`，校验失败存成 `Err`，首次请求时报错。
     pub fn new(host: &str, project: &str, ini_path: Option<&str>) -> Self {
         let ini = ini_path
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|text| FieldScheme::from_ini(&text));
         let (index_addr, search_addr) = Self::split_addrs(host);
         let has_ini = ini.is_some();
+        let project = crate::validate_index_name(project)
+            .map(|()| project.to_string())
+            .map_err(|_| project.to_string());
         Self {
-            project: project.to_string(),
+            project,
             index_addr,
             search_addr,
             scheme: Mutex::new(ini.unwrap_or_else(FieldScheme::default)),
             has_ini,
         }
+    }
+
+    /// CMD_USE 的项目名；构造时被拒的名字在此报 `InvalidIndexName`（所有
+    /// 发请求的方法都经过 [`Self::use_project`]）。
+    fn project_name(&self) -> crate::Result<&str> {
+        self.project
+            .as_ref()
+            .map(String::as_str)
+            .map_err(|raw| crate::ScoutError::InvalidIndexName(raw.clone()))
     }
 
     /// host 拆成 index/search 两端口；无端口或端口非法时默认 8383/8384。
@@ -59,7 +77,8 @@ impl XunSearchEngine {
     }
 
     async fn use_project(&self, stream: &mut TcpStream, db: Option<&str>) -> crate::Result<()> {
-        with_timeout(stream.write_all(&pack_cmd(CMD_USE, 0, 0, self.project.as_bytes(), &[]))).await?;
+        let project = self.project_name()?; // 项目名校验先于协议（同库名）
+        with_timeout(stream.write_all(&pack_cmd(CMD_USE, 0, 0, project.as_bytes(), &[]))).await?;
         expect_ok(stream, OK_PROJECT, "CMD_USE").await?;
         if let Some(db) = db {
             crate::validate_index_name(db)?; // 系统边界：库名校验先于协议
@@ -240,56 +259,6 @@ async fn expect_ok(stream: &mut TcpStream, ok_code: u16, what: &str) -> crate::R
     }
 }
 
-/// 单文档索引命令块：`update=true` 走 UPDATE（arg1=1、buf=小写主键）；
-/// 缺省方案新字段动态分配 vno，ini 方案未声明字段跳过。
-fn doc_commands(scheme: &mut FieldScheme, doc: &SearchDocument, update: bool) -> Vec<u8> {
-    let id_vno = scheme.id_vno();
-    let id_name = scheme.id_name().to_string();
-    let mut out = Vec::new();
-    if update {
-        out.extend_from_slice(&pack_cmd(CMD_INDEX_REQUEST, 1, id_vno, doc.id.to_lowercase().as_bytes(), &[]));
-    } else {
-        out.extend_from_slice(&pack_cmd(CMD_INDEX_REQUEST, 0, 0, &[], &[]));
-    }
-    out.extend_from_slice(&index_field(
-        scheme.field(scheme.id_name()).expect("id field missing from scheme"),
-        doc.id.as_bytes(),
-    ));
-    for (name, value) in &doc.fields {
-        if name == &id_name {
-            continue; // id 值以 doc.id 为准
-        }
-        scheme.add_dynamic(name);
-        if let Some(field) = scheme.field(name) {
-            out.extend_from_slice(&index_field(field, &value_bytes(value)));
-        }
-    }
-    out
-}
-
-/// 字段索引命令：内置分词器按 index 标志发 DOC_INDEX（mixed vno=255 / self
-/// vno+SAVEVALUE），无 self 槽或 numeric 再补 DOC_VALUE；自定义分词器只存值。
-fn index_field(field: &FieldDef, value: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    if !field.custom_tokenizer() {
-        let base = field.weight | if field.with_pos { WITHPOS } else { 0 };
-        if field.index_mixed {
-            out.extend_from_slice(&pack_cmd(CMD_DOC_INDEX, base, MIXED_VNO, value, &[]));
-        }
-        if field.index_self {
-            let save = if field.is_numeric() { 0 } else { SAVEVALUE };
-            out.extend_from_slice(&pack_cmd(CMD_DOC_INDEX, base | save, field.vno, value, &[]));
-        }
-        if !field.index_self || field.is_numeric() {
-            let flag = if field.is_numeric() { NUMERIC_FLAG } else { 0 };
-            out.extend_from_slice(&pack_cmd(CMD_DOC_VALUE, flag, field.vno, value, &[]));
-        }
-    } else {
-        out.extend_from_slice(&pack_cmd(CMD_DOC_VALUE, 0, field.vno, value, &[]));
-    }
-    out
-}
-
 impl Engine for XunSearchEngine {
     fn update<'a>(&'a self, docs: &'a [SearchDocument]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
@@ -460,6 +429,60 @@ mod tests {
             ]
         );
         assert_eq!(scheme.field("title").map(|f| f.vno), Some(1)); // 动态方案已记录新字段
+    }
+
+    #[test]
+    fn doc_commands_skip_empty_values_and_dont_burn_vnos() {
+        // 数组/null/空串经 value_bytes 都是空字节：xapian 拒绝空词，这些字段也不该
+        // 占用动态 vno。引擎里曾有一份漏掉该 guard 的副本，且只有它真正在跑。
+        let mut scheme = FieldScheme::default();
+        let doc = SearchDocument::new(
+            "1",
+            serde_json::json!({"tags": ["a"], "meta": null, "title": ""}),
+        )
+        .unwrap();
+        let cmds = doc_commands(&mut scheme, &doc, false);
+        assert_eq!(
+            cmds,
+            vec![
+                163, 0, 0, 0, 0, 0, 0, 0, // INDEX_REQUEST(INIT)
+                162, 0x81, 0, 0, 1, 0, 0, 0, b'1', // DOC_INDEX(id: weight1|SAVEVALUE)
+            ]
+        );
+        for name in ["tags", "meta", "title"] {
+            assert!(!scheme.has_field(name), "{name} 不该占 vno");
+        }
+    }
+
+    #[test]
+    fn project_name_validation_is_deferred_to_first_use() {
+        // 项目名与库名同进 CMD_USE 包：`../../other_project` 曾原样发出（跳出项目 home）。
+        let bad = XunSearchEngine::new("127.0.0.1:8383", "../../other_project", None);
+        let err = bad.project_name().expect_err("非法项目名必须被拒");
+        assert!(
+            matches!(err, crate::ScoutError::InvalidIndexName(ref n) if n == "../../other_project"),
+            "got {err:?}"
+        );
+        // 正常项目名照旧，别把合规配置一起禁掉
+        let ok = XunSearchEngine::new("127.0.0.1:8383", "books", None);
+        assert_eq!(ok.project_name().unwrap(), "books");
+    }
+
+    #[tokio::test]
+    async fn invalid_project_fails_before_any_packet_is_sent() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1];
+            // 校验失败必须在写包之前返回：连接被放弃，读到 EOF(0) 而不是 CMD_USE(1)。
+            assert_eq!(sock.read(&mut buf).await.unwrap_or(0), 0, "非法项目名不得发出 CMD_USE");
+        });
+        // new() 把给定端口当 index 端口、search 取 port+1；监听器开在 search 端口上。
+        let engine = XunSearchEngine::new(&format!("127.0.0.1:{}", addr.port() - 1), "../../other_project", None);
+        let err = engine.search(&SearchBuilder::new("q")).await.expect_err("非法项目名必须报错");
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        server.await.unwrap();
     }
 
     #[tokio::test]

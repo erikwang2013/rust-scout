@@ -5,7 +5,8 @@ use serde_json::{Map, Value};
 use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
 use crate::typesense_query::{
-    check_import, check_status, ndjson_payload, parse_search_response, search_params,
+    check_import, check_status, ndjson_payload, offset_limit, page_offset, parse_search_response,
+    search_params,
 };
 use crate::{SearchBuilder, SearchDocument, SearchResult};
 
@@ -101,11 +102,17 @@ impl TypesenseEngine {
         check_import(&status, &path, &text)
     }
 
-    /// search 与 paginate 共用的 GET 搜索。
-    async fn search_page(&self, builder: &SearchBuilder, page: usize, per_page: usize) -> crate::Result<SearchResult> {
+    /// search 与 paginate 共用的 GET 搜索（`offset`/`limit` 分页）。
+    ///
+    /// 空 where_in 集合 = 不匹配任何（Collection 语义）：放在这里短路，两个入口
+    /// 都覆盖到，不会只在 search 上修好而 paginate 继续把 `field:=[]` 丢给后端。
+    async fn search_page(&self, builder: &SearchBuilder, offset: usize, limit: usize) -> crate::Result<SearchResult> {
+        if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
+            return Ok(SearchResult::default());
+        }
         let index = builder.index.as_deref().unwrap_or("default");
         crate::validate_index_name(index)?;
-        let params = search_params(builder, page, per_page);
+        let params = search_params(builder, offset, limit);
         let path = format!("/collections/{}/documents/search", percent_encode(index));
         let (status, text) = self.raw(reqwest::Method::GET, &path, Some(&params), None, None).await?;
         check_status("GET", &path, &status, &text)?;
@@ -137,9 +144,14 @@ impl Engine for TypesenseEngine {
         })
     }
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
-        let per_page = builder.take.unwrap_or(10).max(1);
-        let page = builder.skip.unwrap_or(0) / per_page + 1;
-        Box::pin(async move { self.search_page(builder, page, per_page).await })
+        // take(0) = 不取任何结果（Collection/ES 语义）；不加这层会被缺省值撑成 1 条。
+        // 只在 search 上判：paginate 的 take 一律由 per_page 覆盖（同 Collection）。
+        if builder.take == Some(0) {
+            return Box::pin(async move { Ok(SearchResult::default()) });
+        }
+        // skip 精确映射到 offset，不折算成页（页会丢掉 skip % take 的余数）。
+        let (offset, limit) = offset_limit(builder);
+        Box::pin(async move { self.search_page(builder, offset, limit).await })
     }
     fn paginate<'a>(
         &'a self,
@@ -147,20 +159,9 @@ impl Engine for TypesenseEngine {
         page: usize,
         per_page: usize,
     ) -> EngineFuture<'a, SearchResult> {
-        let page = page.max(1);
-        let per_page = per_page.max(1);
-        Box::pin(async move { self.search_page(builder, page, per_page).await })
-    }
-    /// 刷新可见性。**不是**清空集合 —— Typesense 的写操作是同步的，没有 ES
-    /// `_refresh` 的等价物，所以与 `CollectionEngine` 一致地做 no-op。
-    ///
-    /// 曾经这里删掉整个集合：README 的生命周期示例（update → flush → search）
-    /// 在这个驱动上会把数据全删并返回 `Ok(())`。
-    fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
-        Box::pin(async move {
-            crate::validate_index_name(index)?;
-            Ok(())
-        })
+        // 页语义在本地折算成 offset：page N 与 Collection 的 (N-1)*per_page 对齐。
+        let (offset, per_page) = page_offset(page, per_page);
+        Box::pin(async move { self.search_page(builder, offset, per_page).await })
     }
     fn create_index<'a>(
         &'a self,
@@ -250,5 +251,35 @@ mod tests {
             .await
             .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
         assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn take_zero_returns_empty_without_request() {
+        // 回归：take(0) 曾被 max(1) 撑成 1 条。指向必然连不上的地址：真的打网络
+        // 就会失败，返回空结果即证明没有请求。
+        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
+        let result = engine
+            .search(&SearchBuilder::new("").within("books").take(0))
+            .await
+            .unwrap();
+        assert!(result.hits.is_empty());
+        assert_eq!(result.total, 0);
+    }
+
+    #[tokio::test]
+    async fn empty_where_in_short_circuits_search_and_paginate() {
+        // 回归：空 where_in 集合 = 不匹配任何（Collection 语义），曾被拼成
+        // `tag:=[]` 丢给后端（行为由后端决定：报错或匹配全部）。
+        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
+        let builder = SearchBuilder::new("")
+            .within("books")
+            .where_in("tag", Vec::<&str>::new());
+        let result = engine.search(&builder).await.unwrap();
+        assert!(result.hits.is_empty());
+        assert_eq!(result.total, 0);
+        // paginate 走 search_page 的同一条短路，不能只在 search 上修。
+        let paged = engine.paginate(&builder, 2, 10).await.unwrap();
+        assert!(paged.hits.is_empty());
+        assert_eq!(paged.total, 0);
     }
 }

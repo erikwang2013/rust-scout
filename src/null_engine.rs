@@ -40,11 +40,6 @@ impl Engine for NullEngine {
         Box::pin(async move { Ok(SearchResult::default()) })
     }
 
-
-    fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
-        Box::pin(async move { Ok(()) })
-    }
-
     fn create_index<'a>(
         &'a self,
         _index: &'a str,

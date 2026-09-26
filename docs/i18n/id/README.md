@@ -40,7 +40,7 @@ let result = engine.search(
 | 📃 Paginasi | Pemotongan offset `take`/`skip` + paginasi nomor halaman `paginate(page, per_page)` |
 | 🗂️ Banyak indeks | Perutean lewat field `index` tingkat dokumen, indeks bawaan `"default"` |
 | 🔄 Siklus hidup indeks | Alur lengkap `create_index` / `flush` / `reindex` / `delete_index` |
-| 🗑️ Penghapusan lunak | `soft_delete` memberi tanda `__soft_deleted`; penyaringan tiga mode `with_trashed()` / `only_trashed()` |
+| 🗑️ Penghapusan lunak | `soft_delete_in(index, ids)` memberi tanda `__soft_deleted`; penyaringan tiga mode `with_trashed()` / `only_trashed()` |
 | 📦 Operasi massal | `update_bulk` / `delete_bulk` mengurangi pulang-pergi; `delete_in` menghapus tepat pada indeks tertentu |
 | 🔌 Driver plug-and-play | Bawaan in-memory tanpa dependensi; 8 backend masing-masing di balik feature — yang tak dipakai tidak dikompilasi |
 | 🔒 Batas keamanan | Validasi nama indeks (`validate_index_name`) + pengodean persen RFC 3986 untuk mencegah injeksi path |
@@ -119,13 +119,35 @@ rust-scout/
 > Label `[feature]` menandai Cargo feature yang dibutuhkan driver. Bila tidak aktif,
 > `EngineManager` mengembalikan `ScoutError::Unsupported`, bukan menurunkan kemampuan diam-diam.
 
+### Perbedaan Kemampuan Driver
+
+Driver in-memory bawaan adalah acuan semantik. Bila sebuah backend tidak bisa melakukan sesuatu,
+ia **mengatakannya secara eksplisit** alih-alih diam-diam mengembalikan hasil yang salah:
+
+| Driver | Keterbatasan | Perilaku |
+|--------|-----------|-----------|
+| Algolia | Pengurutan memerlukan indeks replika yang dibuat lebih dulu; tidak bisa dipilih per kueri | `order_by` **diabaikan** (hasil tetap dikembalikan, hanya urutannya tak tentu) |
+| XunSearch | Tidak ada perintah protokol untuk `where_in` / `where_not_in` | mengembalikan `Unsupported`; gunakan `where_field` |
+| XunSearch | Server hanya mendukung satu field pengurutan | beberapa `order_by` mengembalikan `Unsupported` |
+| XunSearch | Soft delete belum diimplementasikan | `soft_delete` / `only_trashed` mengembalikan `Unsupported` |
+| XunSearch | Membuat indeks memerlukan ini skema field | `create_index` mengembalikan `Unsupported` (berikan ini ke `XunSearchEngine::new`) |
+
+Ada dua penyelarasan semantik yang disengaja:
+
+- **Saat ES menerima sintaks kueri yang cacat** (`"("`, `"foo AND"`), ia mengembalikan hasil kosong,
+  bukan kesalahan —— driver in-memory melakukan pencocokan substring untuk masukan yang sama, dan
+  400 akan merusak "tukar backend, kode tetap".
+- **`delete` dan `soft_delete` tidak membawa informasi indeks**, jadi apakah keduanya mencakup
+  beberapa indeks bergantung pada backend. Untuk menargetkan satu indeks, selalu gunakan
+  `delete_in` / `soft_delete_in`.
+
 ## Mulai Cepat
 
 ### 1. Tambahkan dependensi
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # hanya untuk contoh
 ```
 
@@ -213,7 +235,7 @@ engine.update_bulk(&docs).await?;                              // tulis massal (
 engine.flush("books").await?;                                  // segarkan visibilitas
 engine.search(&builder).await?;                                // kueri
 engine.delete_in("books", &["book-1".to_string()]).await?;     // hapus dokumen dari satu indeks
-engine.soft_delete(&["book-2".to_string()]).await?;            // hapus lunak (memberi tanda)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // hapus lunak (memberi tanda)
 engine.reindex("books", "books_v2").await?;                    // bangun ulang indeks
 engine.delete_index("books").await?;                           // hapus indeks
 ```
@@ -221,6 +243,15 @@ engine.delete_index("books").await?;                           // hapus indeks
 > `delete` tidak membawa informasi indeks, jadi semantiknya berbeda antar mesin
 > (driver in-memory menghapus lintas indeks, ES hanya menyentuh `default`).
 > Untuk menargetkan satu indeks secara tepat, gunakan `delete_in`.
+>
+> Hal yang sama berlaku untuk hapus lunak: **`soft_delete_in(index, ids)` adalah yang andal
+> di semua mesin**. `soft_delete` tanpa indeks hanya dapat menandai lintas indeks pada
+> backend sinkron (`collection` / `database`); backend HTTP tidak bisa dan mengembalikan
+> `ScoutError::Unsupported` (bukan diam-diam tidak melakukan apa pun).
+>
+> Kontrak `flush` adalah "menyegarkan visibilitas tulisan", **tidak ada driver yang
+> mengosongkan indeks**: ES memakai `_refresh`, driver lainnya membuat tulisan langsung
+> terlihat sehingga menjadi no-op. Untuk mengosongkan indeks, gunakan `delete_index`.
 
 ### Beralih ke Elasticsearch / OpenSearch
 
@@ -288,7 +319,7 @@ Konstruktor konfigurasi mesin lainnya ada di [docs.rs](https://docs.rs/rust-scou
 ### Field yang Dicadangkan
 
 `__soft_deleted` adalah nama field yang dicadangkan untuk fitur hapus lunak
-(`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`); mesin memakainya
+(`Engine::soft_delete_in`, `SearchBuilder::with_trashed()` / `only_trashed()`); mesin memakainya
 untuk menyaring dokumen yang dihapus lunak. Dokumen pengguna **tidak boleh** memakai nama field
 ini sebagai field bisnis.
 

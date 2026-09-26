@@ -35,7 +35,7 @@ let result = engine.search(
 | 📃 Pagination | Découpe par décalage `take`/`skip` + pagination par pages `paginate(page, per_page)` |
 | 🗂️ Index multiples | Routage par champ `index` au niveau du document, index par défaut `"default"` |
 | 🔄 Cycle de vie de l'index | Cycle complet `create_index` / `flush` / `reindex` / `delete_index` |
-| 🗑️ Suppression logique | `soft_delete` pose `__soft_deleted` ; filtrage à trois états `with_trashed()` / `only_trashed()` |
+| 🗑️ Suppression logique | `soft_delete_in(index, ids)` pose `__soft_deleted` ; filtrage à trois états `with_trashed()` / `only_trashed()` |
 | 📦 Opérations en lot | `update_bulk` / `delete_bulk` réduisent les allers-retours ; `delete_in` cible un index précis |
 | 🔌 Pilotes enfichables | Mémoire sans dépendance par défaut ; 8 backends chacun derrière sa feature — l'inutilisé ne se compile pas |
 | 🔒 Limite de sécurité | Validation du nom d'index (`validate_index_name`) + encodage pourcent RFC 3986, contre l'injection de chemin |
@@ -113,13 +113,36 @@ rust-scout/
 > Le tag `[feature]` indique la feature Cargo requise par un pilote. Si elle est désactivée,
 > `EngineManager` renvoie `ScoutError::Unsupported` au lieu de dégrader silencieusement.
 
+### Différences de capacités entre pilotes
+
+Le pilote mémoire par défaut est la référence sémantique. Quand un backend ne sait pas
+faire quelque chose, il **le dit explicitement** au lieu de renvoyer silencieusement des
+résultats faux :
+
+| Pilote | Limitation | Comportement |
+|--------|-----------|--------------|
+| Algolia | Le tri exige des index répliqués construits à l'avance ; impossible à choisir par requête | `order_by` est **ignoré** (les résultats arrivent, seul l'ordre reste indéterminé) |
+| XunSearch | Aucune commande de protocole pour `where_in` / `where_not_in` | renvoie `Unsupported` ; utilisez `where_field` |
+| XunSearch | Le serveur ne gère qu'un seul champ de tri | plusieurs `order_by` renvoient `Unsupported` |
+| XunSearch | Suppression logique non implémentée | `soft_delete` / `only_trashed` renvoient `Unsupported` |
+| XunSearch | Créer un index exige un ini de schéma de champs | `create_index` renvoie `Unsupported` (passez un ini à `XunSearchEngine::new`) |
+
+Deux alignements sémantiques délibérés :
+
+- **Quand ES reçoit une syntaxe de requête malformée** (`"("`, `"foo AND"`), il renvoie un
+  résultat vide plutôt qu'une erreur — le pilote mémoire fait une correspondance de
+  sous-chaînes sur la même entrée, et un 400 casserait « changez de backend, gardez votre code ».
+- **`delete` et `soft_delete` ne portent aucune information d'index** : savoir s'ils
+  couvrent plusieurs index dépend du backend. Pour viser un seul index, utilisez toujours
+  `delete_in` / `soft_delete_in`.
+
 ## Démarrage rapide
 
 ### 1. Ajouter la dépendance
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # exemple uniquement
 ```
 
@@ -205,7 +228,7 @@ engine.update_bulk(&docs).await?;                              // écriture en l
 engine.flush("books").await?;                                  // rafraîchir la visibilité
 engine.search(&builder).await?;                                // requête
 engine.delete_in("books", &["book-1".to_string()]).await?;     // supprimer les docs d'un index
-engine.soft_delete(&["book-2".to_string()]).await?;            // suppression logique (marquage)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // suppression logique (marquage)
 engine.reindex("books", "books_v2").await?;                    // reconstruire un index
 engine.delete_index("books").await?;                           // supprimer l'index
 ```
@@ -213,6 +236,15 @@ engine.delete_index("books").await?;                           // supprimer l'in
 > `delete` ne porte aucune information d'index : sa sémantique varie selon le moteur (le pilote
 > mémoire supprime dans tous les index ; ES ne touche que `default`). Utilisez `delete_in` pour
 > cibler un index précis.
+>
+> Même chose pour la suppression logique : **`soft_delete_in(index, ids)` est la variante
+> fiable quel que soit le moteur**. Le `soft_delete` sans index ne peut marquer dans tous
+> les index que sur les pilotes synchrones (`collection` / `database`) ; les pilotes HTTP
+> ne le peuvent pas et renvoient `ScoutError::Unsupported` (au lieu de ne rien faire en silence).
+>
+> `flush` a pour contrat de rafraîchir la visibilité des écritures : **aucun pilote ne
+> vide un index** — ES passe par `_refresh`, pour les autres pilotes les écritures sont
+> immédiatement visibles, donc un no-op. Pour vider un index, utilisez `delete_index`.
 
 ### Passer à Elasticsearch / OpenSearch
 
@@ -279,7 +311,7 @@ Les constructeurs de configuration des autres moteurs sont documentés sur [docs
 
 ### Champs réservés
 
-`__soft_deleted` est le nom de champ réservé utilisé par la suppression logique (`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`), d'après lequel les moteurs filtrent les documents supprimés logiquement. Les documents utilisateur **ne doivent pas** utiliser ce nom de champ comme champ métier.
+`__soft_deleted` est le nom de champ réservé utilisé par la suppression logique (`Engine::soft_delete_in`, `SearchBuilder::with_trashed()` / `only_trashed()`), d'après lequel les moteurs filtrent les documents supprimés logiquement. Les documents utilisateur **ne doivent pas** utiliser ce nom de champ comme champ métier.
 
 ### Gestion des erreurs
 

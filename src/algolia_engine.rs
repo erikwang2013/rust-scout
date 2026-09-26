@@ -9,20 +9,41 @@ use crate::{SearchBuilder, SearchDocument, SearchHit, SearchResult, TrashedFilte
 /// Algolia 引擎（标准端点 `https://{app_id}.algolia.net`）。文档主键为
 /// `objectID` 保留键，软删除标记 `__soft_deleted` 布尔字段。
 pub struct AlgoliaEngine {
-    host: String,
+    /// 校验通过的主机前缀；`app_id` 非法时为 `None`（见 [`Self::new`]，首次
+    /// 请求由 [`Self::base_url`] 报错）。
+    host: Option<String>,
     app_id: String,
     api_key: String,
     client: reqwest::Client,
 }
 
 impl AlgoliaEngine {
+    /// `app_id` 会被直接拼进主机名，因此**只接受非空 ASCII 字母数字**：含
+    /// `@`/`/`/`:` 等字符的值能把请求（连同 `X-Algolia-API-Key` 头）改道到别的
+    /// 主机。签名是公共 API（`EngineManager` 依赖）不能返回 `Result`，非法值
+    /// 存成 `None`，首次请求时返回 `ScoutError::Unsupported`，绝不发出去。
     pub fn new(app_id: String, api_key: String) -> Self {
+        let host = Self::valid_app_id(&app_id).then(|| format!("https://{app_id}.algolia.net"));
         Self {
-            host: format!("https://{}.algolia.net", app_id),
+            host,
             app_id,
             api_key,
             client: reqwest::Client::new(),
         }
+    }
+
+    fn valid_app_id(app_id: &str) -> bool {
+        !app_id.is_empty() && app_id.bytes().all(|b| b.is_ascii_alphanumeric())
+    }
+
+    /// 请求主机前缀；`app_id` 未通过校验时在此短路（所有请求都经过它）。
+    fn base_url(&self) -> crate::Result<&str> {
+        self.host.as_deref().ok_or_else(|| {
+            crate::ScoutError::Unsupported(format!(
+                "algolia: invalid app_id `{}`: 只允许非空 ASCII 字母数字",
+                self.app_id
+            ))
+        })
     }
 
     /// 发送请求，返回状态码 + body 文本；网络错误经 `?` 转 `ScoutError::Http`。
@@ -35,7 +56,7 @@ impl AlgoliaEngine {
     ) -> crate::Result<(reqwest::StatusCode, String)> {
         let mut request = self
             .client
-            .request(method.clone(), format!("{}{}", self.host, path));
+            .request(method.clone(), format!("{}{}", self.base_url()?, path));
         request = request.header("X-Algolia-Application-Id", &self.app_id);
         request = request.header("X-Algolia-API-Key", &self.api_key);
         if let Some(body) = body {
@@ -118,11 +139,21 @@ impl AlgoliaEngine {
         }
     }
 
-    fn search_body(builder: &SearchBuilder, page: usize, per_page: usize) -> Value {
+    /// 页 N（1 基，`paginate` 语义）→ Algolia 的 offset。
+    fn page_offset(page: usize, per_page: usize) -> usize {
+        page.max(1).saturating_sub(1).saturating_mul(per_page)
+    }
+
+    /// 请求体。用 `offset` + `length` 而不是 `page` + `hitsPerPage`：page 是页号，
+    /// 会把 skip 向下取整到页边界（`skip(15).take(10)` 变成第 10..20 条），
+    /// offset 才能精确命中第 15..25 条。两者互斥，只发 offset 一组；Algolia 的
+    /// offset 与 length 成对出现才走偏移分页（只给 offset 可能退回页语义），
+    /// 所以条数用 `length` 而不是 `hitsPerPage`。`nbHits`（总匹配数）不受影响。
+    fn search_body(builder: &SearchBuilder, offset: usize, limit: usize) -> Value {
         let mut body = Map::new();
         body.insert("query".into(), Value::String(builder.query.clone()));
-        body.insert("page".into(), Value::from(page)); // Algolia page 是 0 基
-        body.insert("hitsPerPage".into(), Value::from(per_page));
+        body.insert("offset".into(), Value::from(offset));
+        body.insert("length".into(), Value::from(limit));
         if let Some(filters) = Self::build_filters(builder) {
             body.insert("filters".into(), Value::String(filters));
         }
@@ -210,16 +241,23 @@ impl Engine for AlgoliaEngine {
     }
 
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
-        let per_page = builder.take.unwrap_or(10).max(1);
-        let page = builder.skip.unwrap_or(0) / per_page;
         // 空 where_in 集合 = 不匹配任何（Collection 语义）：短路空结果。
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
         }
+        // take(0) = 不要结果（Collection 语义）：Algolia 的 hitsPerPage 最小 1，
+        // 原先把 take 钳到 1 会多返回一条。短路后 total 也是 0（CollectionEngine
+        // 那里是「取之前」的全量匹配数）——take(0) 下没有结果可报，不值得为 total
+        // 单发一次查询。
+        if builder.take == Some(0) {
+            return Box::pin(async move { Ok(SearchResult::default()) });
+        }
+        let offset = builder.skip.unwrap_or(0);
+        let limit = builder.take.unwrap_or(10);
         Box::pin(async move {
             let index = builder.index.as_deref().unwrap_or("default");
             crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, page, per_page);
+            let body = Self::search_body(builder, offset, limit);
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             Ok(Self::parse_search_response(&raw))
@@ -232,8 +270,8 @@ impl Engine for AlgoliaEngine {
         page: usize,
         per_page: usize,
     ) -> EngineFuture<'a, SearchResult> {
-        let page = page.max(1) - 1; // Algolia page 是 0 基
         let per_page = per_page.max(1);
+        let offset = Self::page_offset(page, per_page); // 页 N → 第 (N-1)*per_page 条
         // 空 where_in 集合 = 不匹配任何（Collection 语义）：短路空结果。
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
@@ -241,23 +279,10 @@ impl Engine for AlgoliaEngine {
         Box::pin(async move {
             let index = builder.index.as_deref().unwrap_or("default");
             crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, page, per_page);
+            let body = Self::search_body(builder, offset, per_page);
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             Ok(Self::parse_search_response(&raw))
-        })
-    }
-
-
-    /// 刷新可见性。**不是**清空索引 —— Algolia 的写操作是同步的，没有 ES
-    /// `_refresh` 的等价物，所以与 `CollectionEngine` 一致地做 no-op。
-    ///
-    /// 曾经这里打的是 `POST /1/indexes/{i}/clear`：README 的生命周期示例
-    /// （update → flush → search）在这个驱动上会把整个索引删空并返回 `Ok(())`。
-    fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
-        Box::pin(async move {
-            crate::validate_index_name(index)?;
-            Ok(())
         })
     }
 
@@ -440,13 +465,30 @@ mod tests {
     }
 
     #[test]
-    fn search_body_zero_based_page_and_filters() {
+    fn search_body_sends_offset_and_filters() {
         let builder = SearchBuilder::new("q").where_field("cat", 1);
-        let body = AlgoliaEngine::search_body(&builder, 2, 10);
+        let body = AlgoliaEngine::search_body(&builder, 20, 10);
         assert_eq!(body["query"], "q");
-        assert_eq!(body["page"], 2); // 第 3 页 → page=2
-        assert_eq!(body["hitsPerPage"], 10);
+        assert_eq!(body["offset"], 20);
+        assert_eq!(body["length"], 10);
+        // offset/length 与 page/hitsPerPage 互斥，只发偏移那一组
+        assert!(body.get("page").is_none(), "page 会把 skip 取整到页边界");
+        assert!(body.get("hitsPerPage").is_none());
         assert_eq!(body["filters"], "cat=1,NOT __soft_deleted:true");
+    }
+
+    #[test]
+    fn search_body_honours_exact_skip_and_paginate_pages() {
+        // `skip(15).take(10)` 必须命中第 15..25 条：曾经发的是 page(=skip/per_page=1)，
+        // 服务端按页返回第 10..20 条。
+        let body = AlgoliaEngine::search_body(&SearchBuilder::new("q"), 15, 10);
+        assert_eq!(body["offset"], 15);
+        assert_eq!(body["length"], 10);
+        // paginate 的页语义按 (N-1)*per_page 换算，仍然返回第 N 页
+        assert_eq!(AlgoliaEngine::page_offset(1, 10), 0);
+        assert_eq!(AlgoliaEngine::page_offset(2, 10), 10);
+        assert_eq!(AlgoliaEngine::page_offset(3, 7), 14);
+        assert_eq!(AlgoliaEngine::page_offset(0, 10), 0); // 第 0 页按第 1 页
     }
 
     #[test]
@@ -483,6 +525,36 @@ mod tests {
         // 在 update 与 search 之间调用它，而这里曾打 /clear 把索引清空。
         let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
         engine.flush("books").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn take_zero_returns_nothing_without_a_request() {
+        // take(0) 的契约是「不要结果」（Collection 语义）。指向不存在的主机：
+        // 真打网络必然失败，返回 Ok 即证明短路发生在请求之前（原先钳到 1 → 多一条）。
+        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
+        let result = engine
+            .search(&SearchBuilder::new("q").take(0))
+            .await
+            .unwrap();
+        assert!(result.hits.is_empty());
+        assert_eq!(result.total, 0);
+    }
+
+    #[tokio::test]
+    async fn invalid_app_id_fails_before_sending_the_api_key() {
+        // app_id 直接拼进主机名：`evil@attacker.com` 会把请求（连同
+        // X-Algolia-API-Key 头）送到 attacker.com.algolia.net。校验必须先于任何
+        // 网络调用失败，且错误要说清楚原因。
+        let bad = AlgoliaEngine::new("evil@attacker.com".to_string(), "secret".to_string());
+        let err = bad
+            .search(&SearchBuilder::new("q"))
+            .await
+            .expect_err("非法 app_id 必须报错，而不是把 API key 发到别的主机");
+        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
+
+        // 合法 app_id 照常拼主机，别把正常配置一起禁掉
+        let ok = AlgoliaEngine::new("TESTAPPID".to_string(), "k".to_string());
+        assert_eq!(ok.base_url().unwrap(), "https://TESTAPPID.algolia.net");
     }
 
     #[tokio::test]

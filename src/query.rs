@@ -7,7 +7,10 @@ pub(crate) fn build_query(builder: &SearchBuilder) -> serde_json::Value {
     let mut filter = Vec::new();
     let mut must_not = Vec::new();
     if !builder.query.is_empty() {
-        must.push(serde_json::json!({"query_string": {"query": builder.query}}));
+        // lenient 只忽略「类型不匹配」类错误（文本查数值字段）；
+        // "(" / "foo AND" 这类语法错误它挡不住（实测 OpenSearch 2.19 仍 400），
+        // 那部分由引擎按无命中处理，见 [`is_query_parse_error`]。
+        must.push(serde_json::json!({"query_string": {"query": builder.query, "lenient": true}}));
     }
     for where_ in &builder.wheres {
         filter.push(serde_json::json!({"term": {where_.field.clone(): where_.value}}));
@@ -39,7 +42,10 @@ pub(crate) fn build_body(builder: &SearchBuilder, from: usize, size: usize) -> s
     let mut body = serde_json::json!({
         "query": build_query(builder),
         "from": from,
-        "size": size
+        "size": size,
+        // ES 默认只精确统计前 10000 条（超出恒为 10000），其余驱动返回真实 total。
+        // 默认值放在这里、protected 集之外，调用方仍可用 option("track_total_hits", ..) 覆盖。
+        "track_total_hits": true
     });
     // options 透传，但 query/from/size/sort 优先（options 不覆盖）。
     if let Some(options) = builder.options.as_object() {
@@ -114,6 +120,24 @@ pub(crate) fn parse_search_response(raw: &serde_json::Value) -> SearchResult {
     }
 }
 
+/// 判断 400 响应体是否为「查询语法错误」。
+///
+/// `lenient` 只覆盖类型不匹配类错误（文本查数值字段）；`(` / `foo AND` 这类
+/// JavaCC 语法错误照样 400（实测 ES 7.10 血统的 OpenSearch 2.19），故需单独识别：
+/// root_cause 为 query_shard_exception 且 reason 以 "Failed to parse query" 开头。
+pub(crate) fn is_query_parse_error(body: &str) -> bool {
+    let Ok(raw) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    raw.pointer("/error/root_cause/0/type")
+        .and_then(|v| v.as_str())
+        == Some("query_shard_exception")
+        && raw
+            .pointer("/error/root_cause/0/reason")
+            .and_then(|v| v.as_str())
+            .is_some_and(|reason| reason.starts_with("Failed to parse query"))
+}
+
 /// 逐条检查 _bulk 响应 items；任一条失败返回 Backend（含该条 id 与错误）。
 pub(crate) fn check_bulk_items(response: &serde_json::Value) -> crate::Result<()> {
     if let Some(items) = response.get("items").and_then(|v| v.as_array()) {
@@ -152,7 +176,7 @@ mod tests {
             build_query(&builder),
             json!({
                 "bool": {
-                    "must": [{"query_string": {"query": "rust"}}],
+                    "must": [{"query_string": {"query": "rust", "lenient": true}}],
                     "filter": [
                         {"term": {"status": "active"}},
                         {"terms": {"tags": ["a", "b"]}},
@@ -184,12 +208,34 @@ mod tests {
                 "query": {"match_all": {}},
                 "from": 5,
                 "size": 20,
+                "track_total_hits": true,
                 "sort": [
                     {"created_at": {"order": "desc"}},
                     {"title": {"order": "asc"}}
                 ]
             })
         );
+    }
+
+    #[test]
+    fn build_body_defaults_track_total_hits_but_leaves_it_overridable() {
+        // 不设 track_total_hits 时 ES 只精确统计前 10000 条，超出恒报 10000；
+        // 其余驱动都返回真实 total。
+        let body = build_body(&SearchBuilder::default(), 0, 10);
+        assert_eq!(body["track_total_hits"], json!(true));
+        // track_total_hits 不在 query/from/size 的保护集内，options 仍能覆盖默认值。
+        let builder = SearchBuilder::default().option("track_total_hits", 500);
+        assert_eq!(build_body(&builder, 0, 10)["track_total_hits"], json!(500));
+    }
+
+    #[test]
+    fn build_query_marks_query_string_lenient() {
+        // lenient 覆盖「文本查数值字段」这类错误；查询串原样透传，语法由调用方负责
+        // （语法错误在引擎层按无命中处理，见 is_query_parse_error 的测试）。
+        let query = build_query(&SearchBuilder::new("("));
+        let clause = &query["bool"]["must"][0]["query_string"];
+        assert_eq!(clause["query"], json!("("));
+        assert_eq!(clause["lenient"], json!(true));
     }
 
     #[test]
@@ -313,6 +359,52 @@ mod tests {
             build_query(&SearchBuilder::default().with_trashed()),
             json!({"match_all": {}})
         );
+    }
+
+    #[test]
+    fn is_query_parse_error_matches_real_400_body() {
+        // 实测抓取：OpenSearch 2.19 对 query_string:"(" 的响应（lenient:true 也一样 400）。
+        let raw = json!({
+            "error": {
+                "root_cause": [{
+                    "type": "query_shard_exception",
+                    "reason": "Failed to parse query [(]",
+                    "index": "verify"
+                }],
+                "type": "search_phase_execution_exception",
+                "reason": "all shards failed",
+                "phase": "query",
+                "failed_shards": [{
+                    "shard": 0,
+                    "reason": {
+                        "type": "query_shard_exception",
+                        "reason": "Failed to parse query [(]",
+                        "caused_by": {
+                            "type": "parse_exception",
+                            "reason": "Cannot parse '(': Encountered \"<EOF>\" at line 1, column 1."
+                        }
+                    }
+                }]
+            },
+            "status": 400
+        });
+        assert!(is_query_parse_error(&raw.to_string()));
+    }
+
+    #[test]
+    fn is_query_parse_error_ignores_other_failures() {
+        // 同为 shard 级失败但语义是「建不出查询」，不是语法错，不得吞掉。
+        let other_shard_error = json!({
+            "error": {"root_cause": [{"type": "query_shard_exception", "reason": "failed to create query: x"}]}
+        });
+        assert!(!is_query_parse_error(&other_shard_error.to_string()));
+        // 请求级错误（映射、参数非法等）同样不吞。
+        let mapping_error = json!({
+            "error": {"root_cause": [{"type": "illegal_argument_exception", "reason": "bad"}]}
+        });
+        assert!(!is_query_parse_error(&mapping_error.to_string()));
+        assert!(!is_query_parse_error("not json"));
+        assert!(!is_query_parse_error("{}"));
     }
 
     #[test]

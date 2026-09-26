@@ -39,7 +39,7 @@ let result = engine.search(
 | 📃 페이징 | `take`/`skip` 오프셋 잘라내기 + `paginate(page, per_page)` 페이지 번호 방식 |
 | 🗂️ 다중 색인 | 문서 단위 `index` 필드로 라우팅, 기본 색인은 `"default"` |
 | 🔄 색인 라이프사이클 | `create_index` / `flush` / `reindex` / `delete_index` 전 과정 |
-| 🗑️ 소프트 삭제 | `soft_delete` 가 `__soft_deleted` 를 표시하고, `with_trashed()` / `only_trashed()` 로 3상태 필터 |
+| 🗑️ 소프트 삭제 | `soft_delete_in(index, ids)` 가 `__soft_deleted` 를 표시하고, `with_trashed()` / `only_trashed()` 로 3상태 필터 |
 | 📦 벌크 작업 | `update_bulk` / `delete_bulk` 로 왕복 감소. `delete_in` 은 지정 색인만 정확히 삭제 |
 | 🔌 교체 가능한 드라이버 | 기본은 의존성 없음. 8가지 백엔드는 각자 feature 로 게이트되어 안 쓰는 것은 컴파일되지 않음 |
 | 🔒 안전 경계 | 색인 이름 검증(`validate_index_name`) + RFC 3986 퍼센트 인코딩으로 경로 주입 차단 |
@@ -116,13 +116,34 @@ rust-scout/
 > `[feature]` 는 해당 드라이버에 필요한 Cargo feature 를 뜻한다. 활성화되지 않으면
 > `EngineManager` 는 조용히 성능을 떨어뜨리는 대신 `ScoutError::Unsupported` 를 반환한다.
 
+### 드라이버 능력 차이
+
+기본 메모리 드라이버가 의미론의 기준이다. 백엔드가 할 수 없는 일이 있으면 조용히 잘못된 결과를
+반환하는 대신 **명시적으로 알린다**:
+
+| 드라이버 | 제약 | 동작 |
+|--------|-----------|-----------|
+| Algolia | 정렬에는 미리 만들어 둔 레플리카 색인이 필요하고, 쿼리마다 고를 수는 없다 | `order_by` 는 **무시된다**(결과는 그대로 반환되고 순서만 정해지지 않음) |
+| XunSearch | `where_in` / `where_not_in` 에 해당하는 프로토콜 명령이 없다 | `Unsupported` 를 반환; `where_field` 를 사용 |
+| XunSearch | 서버가 지원하는 정렬 필드는 하나뿐 | `order_by` 를 여러 개 주면 `Unsupported` 를 반환 |
+| XunSearch | 소프트 삭제 미구현 | `soft_delete` / `only_trashed` 는 `Unsupported` 를 반환 |
+| XunSearch | 색인 생성에는 필드 스킴 ini 가 필요 | `create_index` 는 `Unsupported` 를 반환(`XunSearchEngine::new` 에 ini 전달) |
+
+의도적으로 맞춘 의미론이 두 가지 있다:
+
+- **ES 가 잘못된 쿼리 문법**(`"("`, `"foo AND"`)을 받으면 오류 대신 빈 결과를 반환한다 ——
+  메모리 드라이버는 같은 입력에 대해 부분 문자열 일치를 수행하고, 400 을 반환하면
+  "백엔드를 바꿔도 코드는 그대로" 가 깨지기 때문이다.
+- **`delete` 와 `soft_delete` 는 색인 정보를 담고 있지 않다** 따라서 여러 색인에 걸치는지는
+  백엔드에 달려 있다. 색인 하나를 지정하려면 항상 `delete_in` / `soft_delete_in` 을 사용한다.
+
 ## 빠른 시작
 
 ### 1. 의존성 추가
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # 예제에서만 필요
 ```
 
@@ -210,13 +231,22 @@ engine.update_bulk(&docs).await?;                              // 벌크 쓰기 
 engine.flush("books").await?;                                  // 가시성 갱신
 engine.search(&builder).await?;                                // 검색
 engine.delete_in("books", &["book-1".to_string()]).await?;     // 색인을 지정해 문서 삭제
-engine.soft_delete(&["book-2".to_string()]).await?;            // 소프트 삭제 (플래그 표시)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // 소프트 삭제 (플래그 표시)
 engine.reindex("books", "books_v2").await?;                    // 색인 재구축
 engine.delete_index("books").await?;                           // 색인 삭제
 ```
 
 > `delete` 는 색인 정보를 갖지 않으므로 의미가 엔진마다 다르다(메모리 드라이버는 색인을 가로질러
 > 삭제하고, ES 는 `default` 색인만 본다). 특정 색인으로 한정하려면 `delete_in` 을 사용한다.
+>
+> 소프트 삭제도 마찬가지다: **`soft_delete_in(index, ids)` 가 엔진을 가리지 않고 믿을 수 있는
+> 쪽이다**. 색인을 지정하지 않는 `soft_delete` 는 동기 백엔드(`collection` / `database`)만
+> 색인을 가로질러 표시할 수 있다; HTTP 백엔드는 못 하고 `ScoutError::Unsupported` 를
+> 반환한다(조용히 아무것도 하지 않는 것이 아니라).
+>
+> `flush` 의 계약은 "쓰기 가시성 갱신"이고, **어떤 드라이버도 색인을 비우지 않는다**:
+> ES 는 `_refresh` 를 실행하고, 나머지 드라이버는 쓰기가 즉시 보이므로 no-op. 색인을
+> 비우려면 `delete_index` 를 사용한다.
 
 ### Elasticsearch / OpenSearch 로 전환
 
@@ -282,7 +312,7 @@ let engine = EngineManager::new(config).engine()?;
 
 ### 예약 필드
 
-`__soft_deleted` 는 소프트 삭제 기능(`Engine::soft_delete`, `SearchBuilder::with_trashed()`
+`__soft_deleted` 는 소프트 삭제 기능(`Engine::soft_delete_in`, `SearchBuilder::with_trashed()`
 / `only_trashed()`)이 사용하는 예약 필드 이름이며, 엔진은 이 값을 보고 소프트 삭제된 문서를 걸러낸다.
 사용자 문서에서 이 필드 이름을 비즈니스 필드로 **사용해서는 안 된다**.
 

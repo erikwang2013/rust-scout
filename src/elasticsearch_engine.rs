@@ -1,6 +1,6 @@
 use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
-use crate::query::{build_body, check_bulk_items, parse_search_response};
+use crate::query::{build_body, check_bulk_items, is_query_parse_error, parse_search_response};
 use crate::{SearchBuilder, SearchDocument, SearchResult};
 
 pub struct ElasticsearchEngine {
@@ -68,6 +68,38 @@ impl ElasticsearchEngine {
     }
 }
 
+impl ElasticsearchEngine {
+    /// `_search` 请求。查询语法错误时 ES 会 400，而 CollectionEngine 对同样输入是 Ok
+    /// （`lenient` 挡不住语法错误，见 [`crate::query::is_query_parse_error`]），
+    /// 这里按「无命中」处理以对齐契约；其余非 2xx 照旧报错。
+    fn search_hits(
+        &self,
+        builder: &SearchBuilder,
+        from: usize,
+        size: usize,
+    ) -> crate::Result<SearchResult> {
+        let index = builder.index.as_deref().unwrap_or("default");
+        crate::validate_index_name(index)?;
+        let path = format!("/{}/_search", percent_encode(index));
+        let (status, body) = self.raw_request(
+            reqwest::Method::POST,
+            &path,
+            Some(build_body(builder, from, size).to_string()),
+            Some("application/json"),
+        )?;
+        if status == reqwest::StatusCode::BAD_REQUEST && is_query_parse_error(&body) {
+            return Ok(SearchResult::default());
+        }
+        if !status.is_success() {
+            return Err(crate::ScoutError::Backend(format!(
+                "{} {} -> {}: {}",
+                reqwest::Method::POST, path, status, body
+            )));
+        }
+        Ok(parse_search_response(&serde_json::from_str(&body)?))
+    }
+}
+
 impl Engine for ElasticsearchEngine {
     fn update<'a>(&'a self, docs: &'a [SearchDocument]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
@@ -103,7 +135,19 @@ impl Engine for ElasticsearchEngine {
                     percent_encode(index),
                     percent_encode(id)
                 );
-                let _ = self.request(reqwest::Method::DELETE, &path, None)?;
+                let (status, body) =
+                    self.raw_request(reqwest::Method::DELETE, &path, None, None)?;
+                // ES 对「文档不存在」和「索引不存在」都回 404；删除必须幂等，
+                // 与 collection/database/typesense/meilisearch 保持一致。
+                if status == reqwest::StatusCode::NOT_FOUND {
+                    continue;
+                }
+                if !status.is_success() {
+                    return Err(crate::ScoutError::Backend(format!(
+                        "{} {} -> {}: {}",
+                        reqwest::Method::DELETE, path, status, body
+                    )));
+                }
             }
             Ok(())
         })
@@ -111,12 +155,9 @@ impl Engine for ElasticsearchEngine {
 
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
         Box::pin(async move {
-            let index = builder.index.as_deref().unwrap_or("default");
-            crate::validate_index_name(index)?;
-            let path = format!("/{}/_search", percent_encode(index));
-            let body = build_body(builder, builder.skip.unwrap_or(0), builder.take.unwrap_or(10));
-            let raw = self.request(reqwest::Method::POST, &path, Some(body))?;
-            Ok(parse_search_response(&raw))
+            let from = builder.skip.unwrap_or(0);
+            let size = builder.take.unwrap_or(10);
+            self.search_hits(builder, from, size)
         })
     }
 
@@ -132,12 +173,7 @@ impl Engine for ElasticsearchEngine {
             let mut base = builder.clone();
             base.skip = Some((page - 1).saturating_mul(per_page));
             base.take = Some(per_page);
-            let index = base.index.as_deref().unwrap_or("default");
-            crate::validate_index_name(index)?;
-            let path = format!("/{}/_search", percent_encode(index));
-            let body = build_body(&base, base.skip.unwrap_or(0), base.take.unwrap_or(10));
-            let raw = self.request(reqwest::Method::POST, &path, Some(body))?;
-            Ok(parse_search_response(&raw))
+            self.search_hits(&base, base.skip.unwrap_or(0), base.take.unwrap_or(10))
         })
     }
 
@@ -320,6 +356,96 @@ mod tests {
             "expected Unsupported, got {err:?}"
         );
         assert!(err.to_string().contains("soft_delete_in"), "错误信息要指出正确用法");
+    }
+
+    // 手工 poll 而不借 tokio runtime：reqwest::blocking 在 debug 构建里会
+    // `enter()` 一个临时 runtime（blocking/wait.rs），在已有 runtime 上下文里再
+    // enter 会 panic（tokio runtime/context/runtime.rs）。引擎的 future 全是阻塞
+    // 调用、首次 poll 就 Ready，所以不需要真正的调度器。
+    fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+        let mut fut = std::pin::pin!(fut);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        loop {
+            if let std::task::Poll::Ready(output) = fut.as_mut().poll(&mut cx) {
+                return output;
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    // 裸 TcpListener 冒充 ES：回一个固定状态码 + body，省掉 HTTP mock 依赖。
+    fn stub_es(status: u16, body: &'static str) -> String {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        let addr = listener.local_addr().expect("stub addr");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept stub");
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 {status} Stub\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            );
+        });
+        format!("http://{addr}")
+    }
+
+    // 实测抓取：OpenSearch 2.19 对 query_string:"(" 的 400 响应（带 lenient:true 也一样）。
+    const PARSE_ERROR_BODY: &str = r#"{"error":{"root_cause":[{"type":"query_shard_exception","reason":"Failed to parse query [(]","index":"verify"}],"type":"search_phase_execution_exception","reason":"all shards failed","phase":"query","failed_shards":[{"shard":0,"reason":{"type":"query_shard_exception","reason":"Failed to parse query [(]","caused_by":{"type":"parse_exception","reason":"Cannot parse '(': Encountered \"<EOF>\" at line 1, column 1."}}}]},"status":400}"#;
+
+    #[test]
+    fn search_returns_empty_result_on_malformed_query() {
+        // lenient 挡不住 JavaCC 语法错误，ES 仍回 400；CollectionEngine 对同样输入
+        // 是 Ok，所以这里必须返回空结果，而不是把 400 抛给业务代码。
+        let engine = ElasticsearchEngine::new(stub_es(400, PARSE_ERROR_BODY), None);
+        let result = block_on(engine.search(&SearchBuilder::new("(")));
+        drop(engine);
+        let result = result.expect("语法错误应当返回空结果而不是 Err");
+        assert_eq!(result.total, 0);
+        assert!(result.hits.is_empty());
+    }
+
+    #[test]
+    fn search_still_fails_on_other_400() {
+        // 非语法错的 400（参数非法/映射错误）不能被吞成空结果。
+        let engine = ElasticsearchEngine::new(
+            stub_es(
+                400,
+                r#"{"error":{"root_cause":[{"type":"illegal_argument_exception","reason":"bad"}],"type":"illegal_argument_exception"},"status":400}"#,
+            ),
+            None,
+        );
+        let result = block_on(engine.search(&SearchBuilder::new("x")));
+        drop(engine);
+        assert!(
+            matches!(result, Err(crate::ScoutError::Backend(_))),
+            "非语法错的 400 仍须上抛，得到 {result:?}"
+        );
+    }
+
+    #[test]
+    fn delete_in_treats_404_as_success() {
+        // ES 对「文档不存在」和「索引不存在」都回 404。delete() 委托 delete_in，
+        // 重复删除必须像 collection/database/typesense/meilisearch 一样返回 Ok。
+        let engine = ElasticsearchEngine::new(stub_es(404, "{}"), None);
+        let result = block_on(engine.delete_in("default", &["missing".to_string()]));
+        drop(engine);
+        assert!(result.is_ok(), "404 应当幂等成功，得到 {result:?}");
+    }
+
+    #[test]
+    fn delete_in_still_fails_on_other_non_2xx() {
+        let engine = ElasticsearchEngine::new(stub_es(500, "{}"), None);
+        let result = block_on(engine.delete_in("default", &["x".to_string()]));
+        drop(engine);
+        assert!(
+            matches!(result, Err(crate::ScoutError::Backend(_))),
+            "非 404 的错误仍须上抛，得到 {result:?}"
+        );
     }
 
     #[test]

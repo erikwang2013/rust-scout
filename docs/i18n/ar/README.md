@@ -35,7 +35,7 @@ let result = engine.search(
 | 📃 ترقيم الصفحات | اقتطاع بالإزاحة عبر `take`/`skip` + ترقيم بالصفحات عبر `paginate(page, per_page)` |
 | 🗂️ فهارس متعددة | توجيه عبر حقل `index` على مستوى المستند، والفهرس الافتراضي `"default"` |
 | 🔄 دورة حياة الفهرس | المسار الكامل لـ `create_index` / `flush` / `reindex` / `delete_index` |
-| 🗑️ الحذف الناعم | يضع `soft_delete` علامة `__soft_deleted`؛ وتصفية ثلاثية الحالات عبر `with_trashed()` / `only_trashed()` |
+| 🗑️ الحذف الناعم | يضع `soft_delete_in(index, ids)` علامة `__soft_deleted`؛ وتصفية ثلاثية الحالات عبر `with_trashed()` / `only_trashed()` |
 | 📦 عمليات مجمّعة | `update_bulk` / `delete_bulk` تقلّلان الرحلات ذهابًا وإيابًا؛ و`delete_in` يستهدف فهرسًا واحدًا بدقة |
 | 🔌 محركات قابلة للتبديل | الافتراضي بلا اعتماديات؛ و8 خلفيات كل واحدة خلف ميزة خاصة بها، فما لا تستخدمه لا يُصرَّف |
 | 🔒 حدود الأمان | التحقق من اسم الفهرس (`validate_index_name`) + ترميز النسبة المئوية وفق RFC 3986 لمنع حقن المسارات |
@@ -112,13 +112,34 @@ rust-scout/
 > تشير `[feature]` إلى ميزة Cargo التي يحتاجها ذلك المحرك. وعندما تكون غير مفعّلة،
 > يعيد `EngineManager` الخطأ `ScoutError::Unsupported` بدلًا من التدهور الصامت.
 
+### فروق قدرات المحركات
+
+محرك الذاكرة الافتراضي هو خط الأساس الدلالي. وحين لا تستطيع أي خلفية القيام بشيء ما،
+فإنها **تقول ذلك صراحةً** بدل أن تعيد نتائج خاطئة بصمت:
+
+| المحرك | القيد | السلوك |
+|--------|-----------|-----------|
+| Algolia | الترتيب يتطلّب فهارس نسخ (replica) مُعدّة سلفًا؛ ولا يمكن اختياره لكل استعلام | `order_by` **متجاهَل** (النتائج تُعاد رغم ذلك، لكن الترتيب غير محدَّد) |
+| XunSearch | `where_in` / `where_not_in`: لا يوجد أمر بروتوكول لهما | يعيد `Unsupported`؛ استخدم `where_field` |
+| XunSearch | الخادم يدعم حقل ترتيب واحدًا فقط | استخدام عدة `order_by` يعيد `Unsupported` |
+| XunSearch | الحذف الناعم غير مُنفَّذ | `soft_delete` / `only_trashed` يعيدان `Unsupported` |
+| XunSearch | إنشاء فهرس يحتاج ملف ini لمخطط الحقول | `create_index` يعيد `Unsupported` (مرّر ملف ini إلى `XunSearchEngine::new`) |
+
+مواءمتان دلاليتان مقصودتان:
+
+- **عندما يتلقّى ES صيغة استعلام مشوَّهة** (`"("`, `"foo AND"`) فإنه يعيد نتيجة فارغة بدل
+  خطأ — إذ يجري محرك الذاكرة مطابقة سلسلة فرعية على المدخل نفسه، وخطأ 400 سيكسر مبدأ
+  "بدّل الخلفية واحتفظ بكودك".
+- **`delete` و`soft_delete` لا يحملان أي معلومة عن الفهرس**، لذا فإن شمولهما لعدة فهارس
+  يعتمد على الخلفية. لاستهداف فهرس واحد استخدم دائمًا `delete_in` / `soft_delete_in`.
+
 ## بدء سريع
 
 ### 1. إضافة التبعية
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # للمثال فقط
 ```
 
@@ -206,7 +227,7 @@ engine.update_bulk(&docs).await?;                              // كتابة م�
 engine.flush("books").await?;                                  // تحديث الظهور
 engine.search(&builder).await?;                                // استعلام
 engine.delete_in("books", &["book-1".to_string()]).await?;     // حذف مستندات من فهرس واحد
-engine.soft_delete(&["book-2".to_string()]).await?;            // حذف ناعم (وضع علامة)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // حذف ناعم (وضع علامة)
 engine.reindex("books", "books_v2").await?;                    // إعادة بناء الفهرس
 engine.delete_index("books").await?;                           // حذف الفهرس
 ```
@@ -214,6 +235,15 @@ engine.delete_index("books").await?;                           // حذف الف�
 > لا يحمل `delete` أي معلومة عن الفهرس، لذا يختلف معناه من محرك لآخر (محرك الذاكرة
 > يحذف عبر كل الفهارس، بينما ES يمسّ `default` فقط). لاستهداف فهرس واحد بدقة
 > استخدم `delete_in`.
+>
+> وينطبق الأمر نفسه على الحذف الناعم: **`soft_delete_in(index, ids)` هو الموثوق عبر كل المحركات**.
+> أما `soft_delete` بدون فهرس فلا يستطيع وضع العلامة عبر الفهارس إلا على خلفية متزامنة
+> (`collection` / `database`)؛ أما خلفيات HTTP فلا تستطيع ذلك وتعيد `ScoutError::Unsupported`
+> (بدلًا من ألّا تفعل شيئًا بصمت).
+>
+> عقد `flush` هو تحديث ظهور الكتابات — **ولا يقوم أي محرك بإفراغ الفهرس**: ES ينفّذ
+> `_refresh`، وبقية المحركات تكون كتاباتها ظاهرة فورًا، لذا هو no-op. لإفراغ فهرس
+> استخدم `delete_index`.
 
 ### التبديل إلى Elasticsearch / OpenSearch
 
@@ -280,7 +310,7 @@ let engine = EngineManager::new(config).engine()?;
 
 ### الحقول المحجوزة
 
-`__soft_deleted` هو اسم الحقل المحجوز الذي تستخدمه ميزة الحذف الناعم (`Engine::soft_delete`،
+`__soft_deleted` هو اسم الحقل المحجوز الذي تستخدمه ميزة الحذف الناعم (`Engine::soft_delete_in`،
 `SearchBuilder::with_trashed()` / `only_trashed()`) لتصفية المستندات المحذوفة ناعمًا. ويجب على
 مستندات المستخدمين **ألا** تستخدم اسم الحقل هذا كحقل عمل.
 

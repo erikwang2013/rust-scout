@@ -35,7 +35,7 @@ let result = engine.search(
 | 📃 Paginierung | `take`/`skip` als Offset-Abschnitt + `paginate(page, per_page)` als Seitenpaginierung |
 | 🗂️ Mehrere Indizes | Routing über das `index`-Feld je Dokument, Standardindex `"default"` |
 | 🔄 Index-Lebenszyklus | Kompletter Ablauf `create_index` / `flush` / `reindex` / `delete_index` |
-| 🗑️ Soft Delete | `soft_delete` setzt `__soft_deleted`; `with_trashed()` / `only_trashed()` als Drei-Zustands-Filter |
+| 🗑️ Soft Delete | `soft_delete_in(index, ids)` setzt `__soft_deleted`; `with_trashed()` / `only_trashed()` als Drei-Zustands-Filter |
 | 📦 Bulk-Operationen | `update_bulk` / `delete_bulk` sparen Round-Trips; `delete_in` löscht gezielt in einem Index |
 | 🔌 Plug-in-Treiber | Standard ist In-Memory ohne Abhängigkeiten; 8 Backends je hinter eigenem feature — Ungenutztes wird nicht kompiliert |
 | 🔒 Sicherheitsgrenze | Indexnamen-Prüfung (`validate_index_name`) + RFC-3986-Percent-Encoding gegen Pfad-Injection |
@@ -113,13 +113,35 @@ rust-scout/
 > `[feature]` markiert das Cargo-feature, das ein Treiber benötigt. Ist es aus,
 > liefert `EngineManager` `ScoutError::Unsupported` statt still zu degradieren.
 
+### Treiberfähigkeiten im Vergleich
+
+Der In-Memory-Treiber ist die semantische Referenz. Kann ein Backend etwas nicht,
+**sagt es das ausdrücklich** — statt still falsche Ergebnisse zu liefern:
+
+| Treiber | Einschränkung | Verhalten |
+|---------|--------------|-----------|
+| Algolia | Sortierung braucht vorab gebaute Replica-Indizes; pro Abfrage nicht wählbar | `order_by` wird **ignoriert** (Ergebnisse kommen trotzdem, nur die Reihenfolge bleibt undefiniert) |
+| XunSearch | Kein Protokollbefehl für `where_in` / `where_not_in` | liefert `Unsupported`; nutze `where_field` |
+| XunSearch | Server unterstützt nur ein Sortierfeld | mehrere `order_by` liefern `Unsupported` |
+| XunSearch | Soft Delete nicht implementiert | `soft_delete` / `only_trashed` liefern `Unsupported` |
+| XunSearch | Index-Anlage braucht eine Feld-Schema-ini | `create_index` liefert `Unsupported` (ini an `XunSearchEngine::new` übergeben) |
+
+Zwei bewusste semantische Angleichungen:
+
+- **Bei fehlerhafter Abfragesyntax** (`"("`, `"foo AND"`) liefert ES ein leeres Ergebnis
+  statt eines Fehlers — der In-Memory-Treiber macht bei derselben Eingabe einen
+  Substring-Match, und ein 400 würde "Backend tauschen, Code behalten" brechen.
+- **`delete` und `soft_delete` tragen keine Index-Information**, ob sie also über Indizes
+  hinweg wirken, hängt vom Backend ab. Um genau einen Index zu treffen, immer
+  `delete_in` / `soft_delete_in` verwenden.
+
 ## Schnellstart
 
 ### 1. Abhängigkeit hinzufügen
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # nur für dieses Beispiel nötig
 ```
 
@@ -207,7 +229,7 @@ engine.update_bulk(&docs).await?;                              // Bulk-Schreiben
 engine.flush("books").await?;                                  // Sichtbarkeit aktualisieren
 engine.search(&builder).await?;                                // Abfrage
 engine.delete_in("books", &["book-1".to_string()]).await?;     // Dokumente gezielt in einem Index löschen
-engine.soft_delete(&["book-2".to_string()]).await?;            // Soft Delete (setzt die Markierung)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // Soft Delete (setzt die Markierung)
 engine.reindex("books", "books_v2").await?;                    // Index neu aufbauen
 engine.delete_index("books").await?;                           // Index löschen
 ```
@@ -215,6 +237,15 @@ engine.delete_index("books").await?;                           // Index löschen
 > `delete` trägt keine Indexinformation, die Semantik unterscheidet sich je Engine (der In-Memory-Treiber
 > löscht über alle Indizes hinweg, ES betrachtet nur `default`). Für einen bestimmten Index bitte
 > `delete_in` verwenden.
+>
+> Für Soft Delete gilt dasselbe: **`soft_delete_in(index, ids)` ist über alle Engines hinweg
+> der zuverlässige**. Das indexlose `soft_delete` kann nur bei synchronen Backends
+> (`collection` / `database`) über Indizes hinweg markieren; die HTTP-Backends können das
+> nicht und geben `ScoutError::Unsupported` zurück (statt stillschweigend gar nichts zu tun).
+>
+> Der Vertrag von `flush` lautet, Schreibvorgänge sichtbar zu machen: **kein Treiber leert
+> einen Index** – ES geht über `_refresh`, bei allen anderen Treibern sind Schreibvorgänge
+> sofort sichtbar, also ein No-op. Um einen Index zu leeren, `delete_index` verwenden.
 
 ### Umstieg auf Elasticsearch / OpenSearch
 
@@ -281,7 +312,7 @@ Die Konfigurationskonstruktoren der übrigen Engines stehen auf [docs.rs](https:
 
 ### Reservierte Felder
 
-`__soft_deleted` ist der reservierte Feldname der Soft-Delete-Funktion (`Engine::soft_delete`,
+`__soft_deleted` ist der reservierte Feldname der Soft-Delete-Funktion (`Engine::soft_delete_in`,
 `SearchBuilder::with_trashed()` / `only_trashed()`); die Engines filtern damit soft-deleted Dokumente
 heraus. Anwenderdokumente **sollten** diesen Feldnamen nicht als Business-Feld verwenden.
 

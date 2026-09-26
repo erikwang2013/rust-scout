@@ -39,7 +39,7 @@ let result = engine.search(
 | 📃 ページング | `take`/`skip` のオフセット切り出し + `paginate(page, per_page)` のページ番号方式 |
 | 🗂️ マルチインデックス | 文書単位の `index` フィールドでルーティング、既定インデックスは `"default"` |
 | 🔄 索引ライフサイクル | `create_index` / `flush` / `reindex` / `delete_index` の全工程 |
-| 🗑️ ソフト削除 | `soft_delete` が `__soft_deleted` を立て、`with_trashed()` / `only_trashed()` で三態フィルタ |
+| 🗑️ ソフト削除 | `soft_delete_in(index, ids)` が `__soft_deleted` を立て、`with_trashed()` / `only_trashed()` で三態フィルタ |
 | 📦 バッチ操作 | `update_bulk` / `delete_bulk` で往復を削減。`delete_in` は指定索引に限定して削除 |
 | 🔌 プラガブルドライバ | 既定は依存ゼロ。8 種のバックエンドはそれぞれ feature ゲートされ、不要なものはコンパイルされない |
 | 🔒 安全境界 | 索引名の検証（`validate_index_name`）+ RFC 3986 パーセント符号化でパス注入を防ぐ |
@@ -116,13 +116,34 @@ rust-scout/
 > `[feature]` はそのドライバに必要な Cargo feature を示す。有効化されていない場合、
 > `EngineManager` は黙って機能を落とすのではなく `ScoutError::Unsupported` を返す。
 
+### ドライバ能力の差異
+
+既定のメモリドライバが意味論の基準になる。バックエンドにできないことがあれば、黙って誤った
+結果を返すのではなく **明示的にそう告げる**：
+
+| ドライバ | 制約 | 挙動 |
+|--------|-----------|-----------|
+| Algolia | ソートには事前に構築したレプリカ索引が必要で、クエリごとに選ぶことはできない | `order_by` は **無視される**（結果自体は返り、順序が不定になるだけ） |
+| XunSearch | `where_in` / `where_not_in` に対応するプロトコルコマンドがない | `Unsupported` を返す；`where_field` を使う |
+| XunSearch | サーバーが扱えるソートフィールドは 1 つだけ | `order_by` を複数指定すると `Unsupported` を返す |
+| XunSearch | ソフト削除は未実装 | `soft_delete` / `only_trashed` は `Unsupported` を返す |
+| XunSearch | 索引の作成にはフィールド定義の ini が必要 | `create_index` は `Unsupported` を返す（`XunSearchEngine::new` に ini を渡す） |
+
+意図的に意味論をそろえている点が 2 つある：
+
+- **ES が壊れたクエリ構文**（`"("`、`"foo AND"`）を受け取ったときは、エラーではなく空の結果を
+  返す —— メモリドライバは同じ入力に対して部分文字列一致を行い、400 を返すと
+  「バックエンドを差し替えてもコードはそのまま」が成り立たなくなるから。
+- **`delete` と `soft_delete` は索引の情報を持たない**ため、複数の索引にまたがるかどうかは
+  バックエンド次第。1 つの索引を対象にするには、常に `delete_in` / `soft_delete_in` を使う。
+
 ## クイックスタート
 
 ### 1. 依存関係を追加
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # サンプルでのみ必要
 ```
 
@@ -210,13 +231,22 @@ engine.update_bulk(&docs).await?;                              // バッチ書�
 engine.flush("books").await?;                                  // 可視性を更新
 engine.search(&builder).await?;                                // 検索
 engine.delete_in("books", &["book-1".to_string()]).await?;     // 索引を限定して文書削除
-engine.soft_delete(&["book-2".to_string()]).await?;            // ソフト削除（フラグを立てる）
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // ソフト削除（フラグを立てる）
 engine.reindex("books", "books_v2").await?;                    // 索引を再構築
 engine.delete_index("books").await?;                           // 索引を削除
 ```
 
 > `delete` は索引情報を持たないため、意味はエンジンごとに異なる（メモリドライバは索引をまたいで
 > 削除し、ES は `default` 索引だけを見る）。特定の索引に限定したい場合は `delete_in` を使う。
+>
+> ソフト削除も同様：**`soft_delete_in(index, ids)` がエンジンを問わず信頼できる方**。
+> 索引を指定しない `soft_delete` は同期バックエンド（`collection` / `database`）だけが
+> 索引をまたいで印を付けられる；HTTP バックエンドにはできず、`ScoutError::Unsupported`
+> を返す（黙って何もしないのではなく）。
+>
+> `flush` の契約は「書き込みの可視性を更新する」ことで、**どのドライバも索引を空にしない**：
+> ES は `_refresh` を実行し、他のドライバは書き込みが即時可視なので no-op。索引を空にする
+> には `delete_index` を使う。
 
 ### Elasticsearch / OpenSearch への切り替え
 
@@ -282,7 +312,7 @@ let engine = EngineManager::new(config).engine()?;
 
 ### 予約フィールド
 
-`__soft_deleted` はソフト削除機能（`Engine::soft_delete`、`SearchBuilder::with_trashed()`
+`__soft_deleted` はソフト削除機能（`Engine::soft_delete_in`、`SearchBuilder::with_trashed()`
 / `only_trashed()`）が使う予約フィールド名で、エンジンはこれを見てソフト削除済みの文書を除外する。
 利用者の文書でこのフィールド名を業務フィールドとして使う**べきではない**。
 

@@ -115,13 +115,32 @@ rust-scout/
 > `[feature]` 标注的是该驱动所需的 Cargo feature；未启用时
 > `EngineManager` 会返回 `ScoutError::Unsupported`，而不是静默降级。
 
+### 驱动能力差异
+
+默认内存驱动是语义基准；下列后端做不到的部分会**显式报错**，而不是静默给出错误结果：
+
+| 驱动 | 限制 | 表现 |
+|------|------|------|
+| Algolia | 排序需预先建 replica index，客户端无法临时指定 | `order_by` **被忽略**（结果仍返回，只是顺序不保证） |
+| XunSearch | `where_in` / `where_not_in` 无对应协议命令 | 返回 `Unsupported`，请用 `where_field` |
+| XunSearch | 服务端只支持单字段排序 | 多个 `order_by` 返回 `Unsupported` |
+| XunSearch | 未实现软删除 | `soft_delete` / `only_trashed` 返回 `Unsupported` |
+| XunSearch | 建索引需要字段方案 ini | `create_index` 返回 `Unsupported`（改用 `XunSearchEngine::new` 传 ini） |
+
+另外两处刻意的语义对齐：
+
+- **ES 收到畸形查询语法**（如 `"("`、`"foo AND"`）时返回空结果而非报错 ——
+  内存驱动对同样输入是子串匹配，报 400 会破坏「换后端不改代码」。
+- **`delete` 与 `soft_delete` 不带索引信息**，跨索引与否因后端而异；
+  要精确到某个索引请一律用 `delete_in` / `soft_delete_in`。
+
 ## 快速开始
 
 ### 1. 添加依赖
 
 ```toml
 [dependencies]
-rust-scout = "0.5"
+rust-scout = "0.6"
 tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
 ```
 
@@ -354,9 +373,13 @@ $ cargo run --example pet
        \_________________/
          \   ~~~~~~   /
           \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+        +----------------+
+        |  [] [] [] []   |
+        |  [] [] [] []   |
+        +----------------+
+           ||      ||
+           ||      ||
+          (__)    (__)
 
 
    ,^.     ,^.     ,^.     ,^.

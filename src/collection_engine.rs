@@ -173,12 +173,6 @@ impl Engine for CollectionEngine {
         })
     }
 
-
-    fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
-        // no-op: mirrors ES _refresh; delete_index is the explicit removal path
-        Box::pin(async move { Ok(()) })
-    }
-
     fn create_index<'a>(
         &'a self,
         index: &'a str,

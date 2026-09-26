@@ -265,13 +265,6 @@ impl Engine for DatabaseEngine {
         })
     }
 
-
-    fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
-        // no-op：无独立索引存储，写入即对查询可见（与 PHP Scout 的 database
-        // 驱动语义一致；ES 的 flush/refresh 概念在此不适用）。
-        Box::pin(async move { Ok(()) })
-    }
-
     fn create_index<'a>(
         &'a self,
         _index: &'a str,
