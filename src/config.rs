@@ -146,13 +146,23 @@ fn default_chunk() -> usize {
     500
 }
 
+/// 校验索引名。所有驱动在写入 / 建索引 / 删索引前都应先过这里。
+///
+/// 除空白、路径分隔符与前导点外，还拒绝**会被后端解释成多索引表达式或通配符**
+/// 的字符：`*` `?` `,` `+`，以及前导 `-` / `_`。这条边界很要紧——
+/// Elasticsearch 把 `_all` 当「全部索引」，而 `_all` 里没有需要百分号编码的字符，
+/// 会原样进到 `DELETE /_all`；ES 7.x 与 OpenSearch 默认
+/// `action.destructive_requires_name=false`，一次调用就能删掉整个集群的索引。
+/// 前导 `_` 同时也是 ES 保留给系统索引的前缀。
 pub fn validate_index_name(index: &str) -> crate::Result<()> {
-    if index
-        .chars()
-        .any(|c| c.is_whitespace() || c == '/' || c == '\\')
+    let bad = index.is_empty()
         || index.starts_with('.')
-        || index.is_empty()
-    {
+        || index.starts_with('-')
+        || index.starts_with('_')
+        || index
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '/' | '\\' | '*' | '?' | ',' | '+'));
+    if bad {
         return Err(crate::ScoutError::InvalidIndexName(index.to_string()));
     }
     Ok(())
@@ -194,6 +204,21 @@ mod tests {
     fn validate_index_name_rejects_invalid() {
         for bad in ["", " ", "a b", "a/b", "a\\b", ".hidden", "\t", "\n"] {
             assert!(validate_index_name(bad).is_err(), "should reject {:?}", bad);
+        }
+    }
+
+    #[test]
+    fn validate_index_name_rejects_wildcards_and_reserved_prefixes() {
+        // `_all` 与通配符会被 ES 展开成多索引表达式：delete_index("_all")
+        // 在 ES 7.x / OpenSearch 默认配置下会删掉集群里所有索引。
+        for bad in [
+            "_all", "_cat", "*", "a*", "a,b", "books*", "a?b", "+a", "-a", "_hidden",
+        ] {
+            assert!(validate_index_name(bad).is_err(), "should reject {:?}", bad);
+        }
+        // 非前导位置的同名字符仍然合法，别把正常名字一起禁掉
+        for good in ["my_index", "a-b", "books-2024", "c#1", "a~b", "中文索引"] {
+            assert!(validate_index_name(good).is_ok(), "should accept {:?}", good);
         }
     }
 }

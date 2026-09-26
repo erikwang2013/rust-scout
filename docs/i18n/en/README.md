@@ -35,7 +35,7 @@ let result = engine.search(
 | 📃 Pagination | `take`/`skip` offset truncation + `paginate(page, per_page)` page-based pagination |
 | 🗂️ Multiple indexes | Document-level `index` field routing, default index `"default"` |
 | 🔄 Index lifecycle | `create_index` / `flush` / `reindex` / `delete_index` full workflow |
-| 🗑️ Soft delete | `soft_delete` marks `__soft_deleted`; `with_trashed()` / `only_trashed()` three-state filtering |
+| 🗑️ Soft delete | `soft_delete_in(index, ids)` marks `__soft_deleted`; `with_trashed()` / `only_trashed()` three-state filtering |
 | 📦 Bulk operations | `update_bulk` / `delete_bulk` cut round-trips; `delete_in` targets one index exactly |
 | 🔌 Pluggable drivers | Zero-dependency default; 8 backends each behind its own feature — what you don't use doesn't compile |
 | 🔒 Safety boundary | Index name validation (`validate_index_name`) + RFC 3986 percent-encoding to prevent path injection |
@@ -119,7 +119,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.3"
+rust-scout = "0.5"
 tokio = { version = "1", features = ["macros", "rt"] }   # example only
 ```
 
@@ -205,7 +205,7 @@ engine.update_bulk(&docs).await?;                              // bulk write (na
 engine.flush("books").await?;                                  // refresh visibility
 engine.search(&builder).await?;                                // query
 engine.delete_in("books", &["book-1".to_string()]).await?;     // delete docs from one index
-engine.soft_delete(&["book-2".to_string()]).await?;            // soft delete (marks the doc)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;  // soft delete (marks the doc)
 engine.reindex("books", "books_v2").await?;                    // rebuild an index
 engine.delete_index("books").await?;                           // drop the index
 ```
@@ -213,6 +213,15 @@ engine.delete_index("books").await?;                           // drop the index
 > `delete` carries no index information, so its semantics vary by engine (the in-memory
 > driver deletes across indexes; ES only touches `default`). Use `delete_in` to target
 > one index exactly.
+>
+> Same for soft delete: **`soft_delete_in(index, ids)` is the one that works everywhere**.
+> The index-less `soft_delete` can only mark across indexes on a synchronous backend
+> (`collection` / `database`); the HTTP backends cannot, and return
+> `ScoutError::Unsupported` instead of silently doing nothing.
+>
+> `flush` means "make pending writes visible" and **never clears an index on any driver**:
+> ES issues `_refresh`, every other driver is immediately visible so it is a no-op.
+> To clear an index, use `delete_index`.
 
 ### Switching to Elasticsearch / OpenSearch
 
@@ -273,11 +282,11 @@ let engine = EngineManager::new(config).engine()?;
 
 Config constructors for the remaining engines are documented on [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> For the SQLite engine (`database`), `total` is counted at the SQL layer (index + LIKE coarse filter); wheres / soft deletes may make `hits.len() < total` after in-memory filtering, and pagination is based on hits.
+> For the SQLite engine (`database`), `total` is the **post-filter** hit count, matching `CollectionEngine`: SQL only does the index + LIKE coarse pass to fetch candidates, then wheres / soft deletes / sorting / pagination all happen in memory. Pagination cannot be pushed down into SQL `LIMIT/OFFSET` — that would make matching rows outside the window permanently unreachable.
 
 ### Reserved Fields
 
-`__soft_deleted` is the reserved field name used by the soft-delete feature (`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`), which engines use to filter out soft-deleted documents. User documents **should not** use this field name as a business field.
+`__soft_deleted` is the reserved field name used by the soft-delete feature (`Engine::soft_delete_in`, `SearchBuilder::with_trashed()` / `only_trashed()`), which engines use to filter out soft-deleted documents. User documents **should not** use this field name as a business field.
 
 ### Error Handling
 
@@ -285,7 +294,7 @@ All operations return `crate::Result<T>`, with errors converging into the unifie
 
 | Variant | Triggered by | feature |
 |---------|--------------|---------|
-| `InvalidIndexName` | index name has whitespace / `/` / `\`, starts with `.`, or is empty (validated before writing) | built-in |
+| `InvalidIndexName` | index name has whitespace / `/` / `\`, starts with `.` or `-` or `_`, is empty, or contains a wildcard/multi-index character (`*` `?` `,` `+`) — validated before writing | built-in |
 | `InvalidResult` | document field is not a JSON object | built-in |
 | `Unsupported` | driver's feature is off, required config missing, or the engine does not support the operation | built-in |
 | `Json` | serde serialization / deserialization error | built-in |

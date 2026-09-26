@@ -44,9 +44,9 @@
   <rect x="358" y="100" width="145" height="132" rx="10" class="node node-alt"/>
   <text x="430" y="124" text-anchor="middle" class="step">③ Flush</text>
   <text x="430" y="148" text-anchor="middle" class="name">flush</text>
-  <text x="430" y="172" text-anchor="middle" class="desc">mémoire / SQLite : no-op</text>
-  <text x="430" y="188" text-anchor="middle" class="desc">backends HTTP : _refresh</text>
-  <text x="430" y="204" text-anchor="middle" class="desc">rendre les écrits visibles</text>
+  <text x="430" y="172" text-anchor="middle" class="desc">no-op：collection/SQLite</text>
+  <text x="430" y="188" text-anchor="middle" class="desc">no-op：Meili/TS/Algolia</text>
+  <text x="430" y="204" text-anchor="middle" class="desc">_refresh：ES</text>
   <line x1="503" y1="166" x2="518" y2="166" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow2)"/>
 
   <rect x="518" y="100" width="145" height="132" rx="10" class="node"/>
@@ -62,7 +62,7 @@
   <text x="750" y="148" text-anchor="middle" class="name">delete · delete_in</text>
   <text x="750" y="172" text-anchor="middle" class="desc">retrait par id ; delete_in</text>
   <text x="750" y="188" text-anchor="middle" class="desc">limité à un index.</text>
-  <text x="750" y="204" text-anchor="middle" class="desc mono">soft_delete : tableau</text>
+  <text x="750" y="204" text-anchor="middle" class="desc mono">soft_delete_in</text>
   <line x1="823" y1="166" x2="838" y2="166" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow2)"/>
 
   <rect x="838" y="100" width="145" height="132" rx="10" class="node node-alt"/>
@@ -114,14 +114,14 @@
   <text x="74" y="407" class="rowlb">Filtre / tri</text>
   <text x="207" y="407" class="cell">matches + sort_hits en mémoire</text>
   <text x="425" y="407" class="cell">pousse term / terms / sort</text>
-  <text x="643" y="407" class="cell">filtre mémoire (total SQL)</text>
+  <text x="643" y="407" class="cell">total = hits.len()</text>
   <text x="861" y="407" class="cell">aucun</text>
 
   <!-- ligne 4 flush -->
   <rect x="60" y="418" width="1007" height="30" rx="4" fill="#f8fafc"/>
   <text x="74" y="437" class="rowlb">flush</text>
   <text x="207" y="437" class="cell">no-op (écrits visibles)</text>
-  <text x="425" y="437" class="cell">_refresh (rend recherchable)</text>
+  <text x="425" y="437" class="cell">ES: _refresh / others: no-op</text>
   <text x="643" y="437" class="cell">no-op</text>
   <text x="861" y="437" class="cell">no-op</text>
 

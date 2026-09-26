@@ -151,11 +151,15 @@ impl Engine for TypesenseEngine {
         let per_page = per_page.max(1);
         Box::pin(async move { self.search_page(builder, page, per_page).await })
     }
+    /// 刷新可见性。**不是**清空集合 —— Typesense 的写操作是同步的，没有 ES
+    /// `_refresh` 的等价物，所以与 `CollectionEngine` 一致地做 no-op。
+    ///
+    /// 曾经这里删掉整个集合：README 的生命周期示例（update → flush → search）
+    /// 在这个驱动上会把数据全删并返回 `Ok(())`。
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            // Typesense 无 _refresh 等价操作：直接删整集合清空（PHP 版同语义）。
-            self.delete_ok(&format!("/collections/{}", percent_encode(index))).await
+            Ok(())
         })
     }
     fn create_index<'a>(
@@ -192,12 +196,16 @@ impl Engine for TypesenseEngine {
         // 与 delete_in 相同：逐条 DELETE（Typesense 无批量删除端点）。
         self.delete_in(index, ids)
     }
-    fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
+    /// 仅作用于 `index`。Typesense 无部分更新：先按 id 搜出原文档，再整体
+    /// upsert 打标版本（搜不到则跳过）。
+    ///
+    /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
+    /// 原先它硬编码 `default`，对写在其它索引里的文档会静默跳过却返回 Ok。
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
-            // Typesense 无部分更新：先按 id 搜出原文档，再整体 upsert 打标版本
-            // （搜不到则跳过）。
+            crate::validate_index_name(index)?;
             for id in ids {
-                let builder = SearchBuilder::new("").within("default").where_field("id", id.clone());
+                let builder = SearchBuilder::new("").within(index).where_field("id", id.clone());
                 let result = self.search(&builder).await?;
                 let Some(hit) = result.hits.first() else {
                     continue;
@@ -212,10 +220,35 @@ impl Engine for TypesenseEngine {
                     index: None,
                     fields,
                 };
-                self.import_docs("default", &[&doc]).await?;
+                self.import_docs(index, &[&doc]).await?;
             }
             Ok(())
         })
     }
     // reindex：trait 默认 Unsupported（Typesense 无原生端点）。
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn flush_is_a_noop_and_makes_no_request() {
+        // 指向必然连不上的地址：真的打网络就会失败，返回 Ok 即证明没有请求。
+        // flush 的契约是「刷新可见性」，绝不能是清空索引——README 的生命周期示例
+        // 在 update 与 search 之间调用它，而这里曾删掉整个索引并返回 Ok。
+        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
+        engine.flush("books").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn index_less_soft_delete_is_refused_not_silently_skipped() {
+        // 曾经它硬编码 default：对写在别的索引里的文档静默跳过却返回 Ok。
+        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
+        let err = engine
+            .soft_delete(&["b1".to_string()])
+            .await
+            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
+        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
+    }
 }

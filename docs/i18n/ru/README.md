@@ -126,7 +126,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.3"
+rust-scout = "0.5"
 tokio = { version = "1", features = ["macros", "rt"] }   # только для примера
 ```
 

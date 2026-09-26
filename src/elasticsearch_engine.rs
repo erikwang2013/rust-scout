@@ -241,11 +241,14 @@ impl Engine for ElasticsearchEngine {
         })
     }
 
-    fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
+    /// 仅作用于 `index`。POST `_update` 单请求原子部分更新（不再读改写）；
+    /// 404（文档不存在，found:false）跳过。
+    ///
+    /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
+    /// 原先它硬编码 `default`，对写在其它索引里的文档会静默什么都不做却返回 Ok。
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
-            // 与 delete() 一致：仅作用于 default 索引。POST _update 单请求原子
-            // 部分更新（不再读改写）；404（文档不存在，found:false）跳过。
-            let index = "default";
+            crate::validate_index_name(index)?;
             for id in ids {
                 let path = format!("/{}/_update/{}", percent_encode(index), percent_encode(id));
                 let (status, body) = self.raw_request(
@@ -279,5 +282,56 @@ impl Engine for ElasticsearchEngine {
             let _ = self.request(reqwest::Method::POST, "/_reindex", Some(body))?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 指向必然连不上的地址：任何真的发出网络请求的方法都会失败，因此「返回 Ok」
+    // 本身就证明它没有打网络。
+    //
+    // 用普通 `#[test]` 而非 `#[tokio::test]`：`reqwest::blocking::Client` 自带一个
+    // runtime，在 async 上下文里构造或析构都会 panic（tokio blocking/shutdown.rs）。
+    // 所以引擎的构造与释放都放在我们自己建的 runtime 之外。
+    fn engine() -> ElasticsearchEngine {
+        ElasticsearchEngine::new("http://127.0.0.1:1".to_string(), None)
+    }
+
+    // new_current_thread 而非 Runtime::new()：后者要 rt-multi-thread，而 dev-deps
+    // 只开了 rt，默认 feature 构建下会编译不过。
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().build().unwrap()
+    }
+
+    #[test]
+    fn index_less_soft_delete_is_refused_not_silently_skipped() {
+        // 曾经它硬编码 default：对写在别的索引里的文档静默成功却什么都没做。
+        let engine = engine();
+        let rt = rt();
+        let err = rt
+            .block_on(engine.soft_delete(&["b1".to_string()]))
+            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
+        drop(engine);
+        drop(rt);
+        assert!(
+            matches!(err, crate::ScoutError::Unsupported(_)),
+            "expected Unsupported, got {err:?}"
+        );
+        assert!(err.to_string().contains("soft_delete_in"), "错误信息要指出正确用法");
+    }
+
+    #[test]
+    fn reserved_index_names_are_rejected() {
+        // delete_index("_all") 在 ES 7.x / OpenSearch 默认配置下会删掉整个集群。
+        let engine = engine();
+        let rt = rt();
+        let err = rt
+            .block_on(engine.delete_index("_all"))
+            .expect_err("_all 必须被拒绝");
+        drop(engine);
+        drop(rt);
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
     }
 }

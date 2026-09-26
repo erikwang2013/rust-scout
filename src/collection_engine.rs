@@ -116,6 +116,21 @@ impl Engine for CollectionEngine {
         })
     }
 
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            crate::validate_index_name(index)?;
+            let mut guard = self.docs.lock().expect("collection engine poisoned");
+            if let Some(ids_set) = guard.get_mut(index) {
+                for id in ids {
+                    if let Some(doc) = ids_set.get_mut(id) {
+                        doc.set("__soft_deleted", true);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
     fn reindex<'a>(&'a self, from: &'a str, to: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             let mut guard = self.docs.lock().expect("collection engine poisoned");
@@ -147,7 +162,7 @@ impl Engine for CollectionEngine {
         let per_page = per_page.max(1);
         Box::pin(async move {
             let mut base = builder.clone();
-            base.skip = Some((page - 1) * per_page);
+            base.skip = Some((page - 1).saturating_mul(per_page));
             base.take = Some(per_page);
             let (hits, total) = self.selected(self.index_for(builder), &base);
             Ok(SearchResult {

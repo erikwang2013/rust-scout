@@ -38,7 +38,7 @@ let result = engine.search(
 | 📃 分页 | `take`/`skip` 偏移截取 + `paginate(page, per_page)` 页码分页 |
 | 🗂️ 多索引 | 文档级 `index` 字段路由，默认索引 `"default"` |
 | 🔄 索引生命周期 | `create_index` / `flush` / `reindex` / `delete_index` 全流程 |
-| 🗑️ 软删除 | `soft_delete` 打 `__soft_deleted` 标记，`with_trashed()` / `only_trashed()` 三态过滤 |
+| 🗑️ 软删除 | `soft_delete_in(index, ids)` 打 `__soft_deleted` 标记，`with_trashed()` / `only_trashed()` 三态过滤 |
 | 📦 批量操作 | `update_bulk` / `delete_bulk` 减少往返；`delete_in` 精确到指定索引删除 |
 | 🔌 可插拔驱动 | 默认内存零依赖；8 种后端各自 feature 门控，按需引入不用的不编译 |
 | 🔒 安全边界 | 索引名校验（`validate_index_name`）+ RFC 3986 百分号编码，杜绝路径注入 |
@@ -121,7 +121,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.4"
+rust-scout = "0.5"
 tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
 ```
 
@@ -209,13 +209,20 @@ engine.update_bulk(&docs).await?;                              // 批量写（�
 engine.flush("books").await?;                                  // 刷新可见性
 engine.search(&builder).await?;                                // 查询
 engine.delete_in("books", &["book-1".to_string()]).await?;     // 精确到索引删文档
-engine.soft_delete(&["book-2".to_string()]).await?;            // 软删除（打标记）
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;  // 软删除（打标记）
 engine.reindex("books", "books_v2").await?;                    // 重建索引
 engine.delete_index("books").await?;                           // 删索引
 ```
 
 > `delete` 不带索引信息，语义因引擎而异（内存驱动跨索引删，ES 只看 `default`
 > 索引）。要精确到某个索引请用 `delete_in`。
+>
+> 软删除同理：**`soft_delete_in(index, ids)` 是跨引擎都可靠的那个**。
+> 不带索引的 `soft_delete` 只有同步后端（`collection` / `database`）能跨索引标记；
+> HTTP 后端做不到，会返回 `ScoutError::Unsupported`（而不是静默什么都不做）。
+>
+> `flush` 的契约是「刷新写入可见性」，**任何驱动都不会清空索引**：ES 走
+> `_refresh`，其余驱动写入即时可见，为 no-op。要清空索引请用 `delete_index`。
 
 ### 切换到 Elasticsearch / OpenSearch
 
@@ -276,12 +283,14 @@ let engine = EngineManager::new(config).engine()?;
 
 其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
-> SQLite 引擎（`database`）的 `total` 为 SQL 层计数（索引 + LIKE 粗筛），
-> wheres / 软删除在内存过滤后可能使 `hits.len() < total`，分页以 hits 为准。
+> SQLite 引擎（`database`）的 `total` 是**过滤后**的命中数（与 `CollectionEngine`
+> 一致）：SQL 只做索引 + LIKE 粗筛把候选集取回，wheres / 软删 / 排序 / 分页都在
+> 内存完成。分页不能下推到 SQL 的 `LIMIT/OFFSET`——那样窗口外的匹配行会永远
+> 取不回来。
 
 ### 保留字段
 
-`__soft_deleted` 是软删除功能（`Engine::soft_delete`、`SearchBuilder::with_trashed()`
+`__soft_deleted` 是软删除功能（`Engine::soft_delete_in`、`SearchBuilder::with_trashed()`
 / `only_trashed()`）使用的保留字段名，引擎据此过滤软删除文档。用户文档**不应**
 使用该字段名作为业务字段。
 
@@ -291,7 +300,7 @@ let engine = EngineManager::new(config).engine()?;
 
 | 变体 | 触发场景 | feature |
 |------|----------|---------|
-| `InvalidIndexName` | 索引名含空白 / `/` / `\`，或以 `.` 开头，或为空（写入前校验） | 内置 |
+| `InvalidIndexName` | 索引名含空白 / `/` / `\`，或以 `.` 开头，或为空；或含 `*` `?` `,` `+` 等通配/多索引字符，或以前导 `-` `_` 开头（写入前校验） | 内置 |
 | `InvalidResult` | 文档字段不是 JSON 对象 | 内置 |
 | `Unsupported` | 驱动所需 feature 未启用、缺少必需配置、引擎不支持该操作 | 内置 |
 | `Json` | serde 序列化 / 反序列化错误 | 内置 |

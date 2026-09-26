@@ -42,7 +42,11 @@ impl XunSearchEngine {
         match host.rsplit_once(':') {
             Some((h, p)) if !h.is_empty() && p.parse::<u16>().is_ok() => {
                 let p = p.parse::<u16>().unwrap();
-                (format!("{h}:{p}"), format!("{h}:{}", p + 1))
+                match p.checked_add(1) {
+                    Some(search) => (format!("{h}:{p}"), format!("{h}:{search}")),
+                    // 65535 没有下一个端口；退回默认对，别溢出成 0（0 不是可连端口）
+                    None => (format!("{h}:8383"), format!("{h}:8384")),
+                }
             }
             Some((h, _)) if !h.is_empty() => (format!("{h}:8383"), format!("{h}:8384")),
             _ => (format!("{host}:8383"), format!("{host}:8384")),
@@ -418,6 +422,28 @@ impl Engine for XunSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_addrs_handles_boundary_ports() {
+        assert_eq!(
+            XunSearchEngine::split_addrs("127.0.0.1:8383"),
+            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
+        );
+        // 65535 没有下一个端口：曾经是 p + 1，debug 下溢出 panic、release 下得 0。
+        assert_eq!(
+            XunSearchEngine::split_addrs("127.0.0.1:65535"),
+            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
+        );
+        // 非法/缺失端口退回默认对
+        assert_eq!(
+            XunSearchEngine::split_addrs("127.0.0.1:not-a-port"),
+            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
+        );
+        assert_eq!(
+            XunSearchEngine::split_addrs("127.0.0.1"),
+            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
+        );
+    }
 
     #[test]
     fn doc_commands_emit_expected_bytes() {

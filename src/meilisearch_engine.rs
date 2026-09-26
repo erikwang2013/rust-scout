@@ -234,11 +234,15 @@ impl Engine for MeilisearchEngine {
     }
 
 
+    /// 刷新可见性。**不是**清空索引 —— Meilisearch 没有 ES `_refresh` 的等价物
+    /// （写入返回 task uid 后异步落盘，搜索在其完成后即一致），所以这里与
+    /// `CollectionEngine` 一致地做 no-op。
+    ///
+    /// 曾经这里打的是 `POST /documents/delete-all`：README 的生命周期示例
+    /// （update → flush → search）在这个驱动上会把整个索引删空并返回 `Ok(())`。
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            let path = format!("/indexes/{}/documents/delete-all", percent_encode(index));
-            let _ = self.request(reqwest::Method::POST, &path, None).await?;
             Ok(())
         })
     }
@@ -343,13 +347,17 @@ impl Engine for MeilisearchEngine {
         self.delete_in(index, ids)
     }
 
-    fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
+    /// 仅作用于 `index`。Meilisearch 的 add-or-replace 是整体替换，无法只更新
+    /// 单字段：先按 id 搜出原文档再整体写回打标版本（搜不到则跳过）。
+    ///
+    /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
+    /// 原先它硬编码 `default`，对写在其它索引里的文档会静默跳过却返回 Ok。
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
-            // Meilisearch 的 add-or-replace 是整体替换，无法只更新单字段：
-            // 先按 id 搜出原文档再整体写回打标版本（搜不到则跳过）。
+            crate::validate_index_name(index)?;
             for id in ids {
                 let builder =
-                    SearchBuilder::new("").within("default").where_field("id", id.clone());
+                    SearchBuilder::new("").within(index).where_field("id", id.clone());
                 let result = self.search(&builder).await?;
                 let Some(hit) = result.hits.first() else {
                     continue;
@@ -462,5 +470,25 @@ mod tests {
         let empty = MeilisearchEngine::parse_search_response(&serde_json::json!({}));
         assert_eq!(empty.total, 0);
         assert!(empty.hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn flush_is_a_noop_and_makes_no_request() {
+        // 指向必然连不上的地址：真的打网络就会失败，返回 Ok 即证明没有请求。
+        // flush 的契约是「刷新可见性」，绝不能是清空索引——README 的生命周期示例
+        // 在 update 与 search 之间调用它，而这里曾打 delete-all 把索引删空。
+        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
+        engine.flush("books").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn index_less_soft_delete_is_refused_not_silently_skipped() {
+        // 曾经它硬编码 default：对写在别的索引里的文档静默跳过却返回 Ok。
+        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
+        let err = engine
+            .soft_delete(&["b1".to_string()])
+            .await
+            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
+        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
     }
 }

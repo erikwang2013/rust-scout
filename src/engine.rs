@@ -58,11 +58,27 @@ pub trait Engine: Send + Sync {
     }
     /// 软删除：给文档打上 `__soft_deleted: true` 标记，配合
     /// `SearchBuilder::with_trashed()` / `only_trashed()` 过滤。
+    ///
+    /// **不带索引信息，语义因引擎而异**：`CollectionEngine` / `DatabaseEngine`
+    /// 跨所有索引标记匹配 id 的文档；HTTP 后端做不到跨索引，会返回
+    /// [`ScoutError::Unsupported`]（而不是静默什么都不做）——这些后端请用
+    /// [`Self::soft_delete_in`]。
     fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
         let _ = ids;
         Box::pin(async move {
             Err(crate::ScoutError::Unsupported(
-                "soft_delete not implemented by this engine".to_string(),
+                "soft_delete (index-less) is not supported by this engine; \
+                 use soft_delete_in(index, ids) instead"
+                    .to_string(),
+            ))
+        })
+    }
+    /// 仅对指定索引做软删除；语义与 [`Self::delete_in`] 一致。
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
+        let _ = (index, ids);
+        Box::pin(async move {
+            Err(crate::ScoutError::Unsupported(
+                "soft_delete_in not implemented by this engine".to_string(),
             ))
         })
     }

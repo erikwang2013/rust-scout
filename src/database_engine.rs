@@ -148,39 +148,28 @@ impl DatabaseEngine {
         let q = builder.query.trim().to_lowercase();
         let like = !q.is_empty();
 
-        // SQL 只负责：索引维度 + LIKE 粗筛 + take/skip 分页。
-        // wheres / 软删 / 排序在内存做（直接复用 matches() 与 sort_hits()）。
-        let mut count_sql =
-            String::from("SELECT COUNT(*) FROM scout_documents WHERE index_name = ?");
+        // SQL 只负责：索引维度 + LIKE 粗筛。
+        //
+        // 分页**不能**下推到 SQL 的 LIMIT/OFFSET：wheres / 软删是内存过滤，SQL 先
+        // 截断会让窗口外的匹配行永远取不回来——3 条文档、where_field 只命中第 3 条、
+        // take(2) 时 SQL 取回前 2 条再被内存滤掉，结果是 0 条，而 CollectionEngine
+        // 返回 1 条。改成与 CollectionEngine::selected 同序：先粗筛取回 → 内存过滤
+        // → 排序 → 取 total → 最后才切 skip/take。
         let mut fetch_sql =
             String::from("SELECT id, data FROM scout_documents WHERE index_name = ?");
         if like {
-            count_sql.push_str(" AND searchable LIKE ? ESCAPE '\\'");
             fetch_sql.push_str(" AND searchable LIKE ? ESCAPE '\\'");
         }
-        fetch_sql.push_str(" LIMIT ? OFFSET ?");
 
         // LIKE 的通配符必须转义成字面量：不转义时查 "50%" 会变成 "50 后跟任意"，
-        // 粗筛放过额外行，而这些行不计入 hits（内存 matches() 会滤掉）却计入
-        // SQL 层 total。CollectionEngine 的 contains() 是字面匹配，转义后两个
-        // 驱动的语义才对得上。
+        // 粗筛放过额外行，而这些行不计入 hits（内存 matches() 会滤掉）。转义后
+        // 与 CollectionEngine 的 contains() 字面匹配语义才对得上。
         let pattern = format!("%{}%", escape_like(&q));
-        let mut count_query = sqlx::query(&count_sql).bind(index);
         let mut fetch_query = sqlx::query(&fetch_sql).bind(index);
         if like {
-            count_query = count_query.bind(&pattern);
             fetch_query = fetch_query.bind(&pattern);
         }
-        // total 先数满足 SQL 的行数（索引 + LIKE），再做内存过滤；
-        // 因此带 wheres/软删过滤时 total 可能大于 hits 数——SQL 层无法下推这些条件。
-        let total: i64 = count_query.fetch_one(&pool).await?.try_get(0)?;
-        let take = builder.take.unwrap_or(i64::MAX as usize) as i64;
-        let skip = builder.skip.unwrap_or(0) as i64;
-        let rows = fetch_query
-            .bind(take)
-            .bind(skip)
-            .fetch_all(&pool)
-            .await?;
+        let rows = fetch_query.fetch_all(&pool).await?;
 
         let docs: Vec<SearchDocument> = rows
             .into_iter()
@@ -200,9 +189,17 @@ impl DatabaseEngine {
             .map(SearchHit::from)
             .collect();
         builder.sort_hits(&mut hits);
+
+        // 与 CollectionEngine::selected 一致：total 是**过滤后**的命中总数，
+        // 分页在最后一步切。
+        let total = hits.len();
+        let offset = builder.skip.unwrap_or(0);
+        let take = builder.take.unwrap_or(total);
+        let hits = hits.into_iter().skip(offset).take(take).collect();
+
         Ok(SearchResult {
             hits,
-            total: total as usize,
+            total,
             ..SearchResult::default()
         })
     }
@@ -262,7 +259,7 @@ impl Engine for DatabaseEngine {
         let per_page = per_page.max(1);
         Box::pin(async move {
             let mut base = builder.clone();
-            base.skip = Some((page - 1) * per_page);
+            base.skip = Some((page - 1).saturating_mul(per_page));
             base.take = Some(per_page);
             self.search_impl(&base).await
         })
@@ -297,6 +294,35 @@ impl Engine for DatabaseEngine {
         // 与 delete_in 一致：index + id 双条件（trait 契约按 index 删除，
         // 与 CollectionEngine 对齐，避免误删其它索引的同 id 文档）。
         Box::pin(self.delete_in_impl(index, ids))
+    }
+
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            crate::validate_index_name(index)?;
+            let pool = self.pool.clone();
+            Self::ensure_schema(&pool).await?;
+            for id in ids {
+                let row = sqlx::query(
+                    "SELECT data FROM scout_documents WHERE index_name = ? AND id = ?",
+                )
+                .bind(index)
+                .bind(id)
+                .fetch_optional(&pool)
+                .await?;
+                let Some(row) = row else { continue };
+                let data: String = row.try_get("data")?;
+                let mut fields: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(&data)?;
+                fields.insert("__soft_deleted".to_string(), serde_json::Value::Bool(true));
+                sqlx::query("UPDATE scout_documents SET data = ? WHERE index_name = ? AND id = ?")
+                    .bind(serde_json::to_string(&fields)?)
+                    .bind(index)
+                    .bind(id)
+                    .execute(&pool)
+                    .await?;
+            }
+            Ok(())
+        })
     }
 
     fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
@@ -335,6 +361,48 @@ mod tests {
         assert_eq!(escape_like("a_b"), "a\\_b");
         // 反斜杠自身必须转义，否则会吃掉后插入的转义符
         assert_eq!(escape_like("a\\b"), "a\\\\b");
+    }
+
+    #[tokio::test]
+    async fn pagination_is_applied_after_wheres_not_before() {
+        // SQL 先 LIMIT 再内存过滤时：take(2) 取回前 2 条，两条都被 where 滤掉，
+        // 结果是 0 条——而真正命中的第 3 条永远取不回来。
+        let engine = engine().await;
+        engine
+            .update(&[
+                doc("a", Some("books"), serde_json::json!({"title": "x", "cat": "news"})),
+                doc("b", Some("books"), serde_json::json!({"title": "y", "cat": "news"})),
+                doc("c", Some("books"), serde_json::json!({"title": "z", "cat": "tech"})),
+            ])
+            .await
+            .unwrap();
+
+        let r = engine
+            .search(
+                &SearchBuilder::new("")
+                    .within("books")
+                    .where_field("cat", "tech")
+                    .take(2),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.hits.len(), 1, "窗口外的匹配行被 SQL LIMIT 丢掉了");
+        assert_eq!(r.hits[0].id, "c");
+        assert_eq!(r.total, 1, "total 应是过滤后的命中数，与 CollectionEngine 一致");
+
+        // skip 在过滤之后生效
+        let r = engine
+            .search(
+                &SearchBuilder::new("")
+                    .within("books")
+                    .order_by("title", false)
+                    .skip(1)
+                    .take(2),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.hits.len(), 2);
+        assert_eq!(r.total, 3);
     }
 
     #[tokio::test]
@@ -392,9 +460,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wheres_filtered_in_memory_total_is_sql_level() {
-        let e = engine().await;
-        e.update(&[
+    async fn wheres_filtered_total_matches_collection_engine() {
+        // 这个用例原先断言 total == 2（SQL 层计数），把「SQL 先截断」的 bug 当成
+        // 预期行为锁住了。现在两个驱动必须给出同样的结论。
+        let docs = [
             doc(
                 "one",
                 Some("books"),
@@ -405,21 +474,26 @@ mod tests {
                 Some("books"),
                 serde_json::json!({"title": "Rust", "category": "fiction"}),
             ),
-        ])
-        .await
-        .unwrap();
-        let result = e
-            .search(
-                &SearchBuilder::new("rust")
-                    .within("books")
-                    .where_field("category", "tech"),
-            )
-            .await
-            .unwrap();
-        assert_eq!(result.hits.len(), 1);
-        assert_eq!(result.hits[0].id, "one");
-        // total 只含 SQL 层条件（索引 + LIKE），wheres 是内存过滤。
-        assert_eq!(result.total, 2);
+        ];
+        let e = engine().await;
+        e.update(&docs).await.unwrap();
+
+        let builder = SearchBuilder::new("rust")
+            .within("books")
+            .where_field("category", "tech");
+        let db_result = e.search(&builder).await.unwrap();
+
+        let reference = crate::CollectionEngine::new();
+        reference.update(&docs).await.unwrap();
+        let ref_result = reference.search(&builder).await.unwrap();
+
+        assert_eq!(db_result.hits.len(), 1);
+        assert_eq!(db_result.hits[0].id, "one");
+        assert_eq!(
+            db_result.total, ref_result.total,
+            "database 与 collection 的 total 必须一致（都是过滤后的命中数）"
+        );
+        assert_eq!(db_result.total, 1);
     }
 
     #[tokio::test]

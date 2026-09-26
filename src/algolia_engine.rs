@@ -249,11 +249,14 @@ impl Engine for AlgoliaEngine {
     }
 
 
+    /// 刷新可见性。**不是**清空索引 —— Algolia 的写操作是同步的，没有 ES
+    /// `_refresh` 的等价物，所以与 `CollectionEngine` 一致地做 no-op。
+    ///
+    /// 曾经这里打的是 `POST /1/indexes/{i}/clear`：README 的生命周期示例
+    /// （update → flush → search）在这个驱动上会把整个索引删空并返回 `Ok(())`。
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            let path = format!("/1/indexes/{}/clear", percent_encode(index));
-            let _ = self.request(reqwest::Method::POST, &path, None).await?;
             Ok(())
         })
     }
@@ -352,19 +355,27 @@ impl Engine for AlgoliaEngine {
         self.delete_in(index, ids)
     }
 
-    fn soft_delete<'a>(&'a self, ids: &'a [String]) -> EngineFuture<'a, ()> {
+    /// 仅作用于 `index`。`partialUpdateObject` 单请求原子部分更新，无需先读原文档。
+    ///
+    /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
+    /// 原先它硬编码 `default`，而且 `partialUpdateObject` 默认
+    /// `createIfNotExists=true`——对写在其它索引里的文档，它会在 `default` 里
+    /// **凭空造一条** `{objectID, __soft_deleted:true}` 幽灵记录。
+    fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
-            // partialUpdateObject 单请求原子部分更新，无需先读原文档。
+            crate::validate_index_name(index)?;
             let requests: Vec<Value> = ids
                 .iter()
                 .map(|id| {
                     serde_json::json!({
-                        "action": "partialUpdateObject",
+                        // NoCreate：目标不存在时不要凭空建记录。用
+                        // partialUpdateObject 会在索引里留下幽灵行。
+                        "action": "partialUpdateObjectNoCreate",
                         "body": {"objectID": id, "__soft_deleted": true}
                     })
                 })
                 .collect();
-            self.batch("default", requests).await
+            self.batch(index, requests).await
         })
     }
 
@@ -463,5 +474,26 @@ mod tests {
     fn parse_response_nb_hits_missing_falls_back() {
         let raw = serde_json::json!({"hits": [{"objectID": "1"}]});
         assert_eq!(AlgoliaEngine::parse_search_response(&raw).total, 1);
+    }
+
+    #[tokio::test]
+    async fn flush_is_a_noop_and_makes_no_request() {
+        // 指向必然连不上的 app_id：真的打网络就会失败，返回 Ok 即证明没有请求。
+        // flush 的契约是「刷新可见性」，绝不能是清空索引——README 的生命周期示例
+        // 在 update 与 search 之间调用它，而这里曾打 /clear 把索引清空。
+        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
+        engine.flush("books").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn index_less_soft_delete_is_refused_not_silently_skipped() {
+        // 曾经它硬编码 default，且 partialUpdateObject 默认 createIfNotExists=true，
+        // 会在 default 里凭空造一条幽灵记录。
+        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
+        let err = engine
+            .soft_delete(&["b1".to_string()])
+            .await
+            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
+        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
     }
 }
