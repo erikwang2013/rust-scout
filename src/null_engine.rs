@@ -66,6 +66,12 @@ impl Engine for NullEngine {
         Box::pin(async move { Ok(()) })
     }
 
+    /// 与带索引的版本一起实现：四个 HTTP 驱动只支持 `soft_delete_in`，
+    /// 按 README 的指引写 `soft_delete_in` 的代码不该在切到 null（临时关闭搜索）时崩。
+    fn soft_delete_in<'a>(&'a self, _index: &'a str, _ids: &'a [String]) -> EngineFuture<'a, ()> {
+        Box::pin(async move { Ok(()) })
+    }
+
     fn soft_delete<'a>(&'a self, _ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move { Ok(()) })
     }
@@ -98,4 +104,16 @@ mod tests {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn soft_delete_in_is_supported() {
+        // 四个 HTTP 驱动只支持带索引的 soft_delete_in，README 也这么指引；
+        // 切到 null（临时关闭搜索）时不能因此报 Unsupported。
+        let engine = NullEngine::new();
+        engine
+            .soft_delete_in("books", &["1".to_string()])
+            .await
+            .unwrap();
+    }
+
 }

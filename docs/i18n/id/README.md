@@ -13,9 +13,9 @@ lengkap yang ringan untuk Rust. Mengadopsi model mental kueri berantai dari
 Null) melalui satu trait `Engine`: **driver in-memory tanpa dependensi untuk pengembangan,
 beralih mulus ke backend apa pun di produksi, tanpa mengubah satu baris pun kode bisnis.**
 
-![Hewan peliharaan proyek: Scout si Search Hound](svg/pet.svg)
+![Hewan peliharaan proyek: Scout si Robot Pencari](svg/pet.svg)
 
-> Hewan peliharaan proyek **Scout si Search Hound** — mengendus dokumen, melacak indeks.
+> Hewan peliharaan proyek **Scout si Robot Pencari** — delapan slot modul di dadanya, pasang yang mana pun.
 > Ia bukan hanya ada di dokumentasi: ia hadir di banner terminal dan di petunjuk kesalahan,
 > lihat [Hewan Peliharaan Proyek](#hewan-peliharaan-proyek).
 
@@ -44,7 +44,7 @@ let result = engine.search(
 | 📦 Operasi massal | `update_bulk` / `delete_bulk` mengurangi pulang-pergi; `delete_in` menghapus tepat pada indeks tertentu |
 | 🔌 Driver plug-and-play | Bawaan in-memory tanpa dependensi; 8 backend masing-masing di balik feature — yang tak dipakai tidak dikompilasi |
 | 🔒 Batas keamanan | Validasi nama indeks (`validate_index_name`) + pengodean persen RFC 3986 untuk mencegah injeksi path |
-| 🐕 Hewan peliharaan | Scout si Search Hound: banner terminal + petunjuk penelusuran per kesalahan (`rust_scout::pet`) |
+| 🤖 Hewan peliharaan | Scout si Robot Pencari: banner terminal + petunjuk penelusuran per kesalahan (`rust_scout::pet`) |
 
 ## Arsitektur
 
@@ -81,29 +81,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # akar crate: ekspor modul + re-ekspor tipe publik yang dibatasi feature
 │   │
-│   ├── engine.rs           # trait Engine: satu-satunya kontrak driver (8 wajib + 5 bawaan)
+│   ├── engine.rs           # trait Engine: satu-satunya kontrak driver (6 wajib + 8 bawaan)
 │   ├── manager.rs          # EngineManager: fasad, mengarahkan per driver dan menyimpan Arc<dyn Engine>
-│   ├── config.rs           # ScoutConfig (8 konstruktor) + validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig (9 konstruktor) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: kueri berantai
 │   ├── document.rs         # SearchDocument: dokumen yang ditulis (kontrak serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: hasil kueri
 │   ├── searchable.rs       # Searchable / SearchableStore: jembatan ke model bisnis
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # hewan peliharaan: Scout si Search Hound (banner + petunjuk kesalahan)
+│   ├── pet.rs              # hewan peliharaan: Scout si Robot Pencari (banner + petunjuk kesalahan)
 │   │
 │   ├── collection_engine.rs    # driver in-memory (bawaan, tanpa dependensi)
 │   ├── null_engine.rs          # driver kosong: buang tulisan, selalu kosong          [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                              [elasticsearch]
-│   │   └── query.rs            #   pembuatan query_string dan penguraian respons
+│   ├── query.rs                #   pembuatan query_string dan penguraian respons
 │   ├── meilisearch_engine.rs   # Meilisearch (REST)                                  [meilisearch]
 │   ├── typesense_engine.rs     # Typesense (REST)                                    [typesense]
-│   │   └── typesense_query.rs  #   parameter pencarian dan pembuatan filter_by
+│   ├── typesense_query.rs      #   parameter pencarian dan pembuatan filter_by
 │   ├── algolia_engine.rs       # Algolia (REST cloud terkelola)                      [algolia]
 │   ├── database_engine.rs      # SQLite (sqlx, saring kasar LIKE + saring halus memori) [database]
 │   ├── xunsearch_engine.rs     # XunSearch: protokol TCP asli xunsearchd             [xunsearch]
-│   │   ├── xunsearch_query.rs  #   kodek paket + skema field ini
-│   │   └── xunsearch_tests.rs  #   uji end-to-end dengan mock server
+│   ├── xunsearch_query.rs      #   kodek paket + skema field ini
+│   ├── xunsearch_tests.rs      #   uji end-to-end dengan mock server
 │   │
 │   └── (uji unit disisipkan di akhir tiap modul: #[cfg(test)] mod tests)
 ├── tests/                  # uji integrasi (masih kosong, uji ada di dalam src)
@@ -131,6 +131,7 @@ ia **mengatakannya secara eksplisit** alih-alih diam-diam mengembalikan hasil ya
 | XunSearch | Server hanya mendukung satu field pengurutan | beberapa `order_by` mengembalikan `Unsupported` |
 | XunSearch | Soft delete belum diimplementasikan | `soft_delete` / `only_trashed` mengembalikan `Unsupported` |
 | XunSearch | Membuat indeks memerlukan ini skema field | `create_index` mengembalikan `Unsupported` (berikan ini ke `XunSearchEngine::new`) |
+| Jumlah bawaan | Tanpa `take`, collection / database mengembalikan **semua** hasil | Enam driver lainnya mengembalikan **10** secara bawaan (batas kebiasaan backend masing-masing) |
 
 Ada dua penyelarasan semantik yang disengaja:
 
@@ -147,7 +148,7 @@ Ada dua penyelarasan semantik yang disengaja:
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # hanya untuk contoh
 ```
 
@@ -250,8 +251,9 @@ engine.delete_index("books").await?;                           // hapus indeks
 > `ScoutError::Unsupported` (bukan diam-diam tidak melakukan apa pun).
 >
 > Kontrak `flush` adalah "menyegarkan visibilitas tulisan", **tidak ada driver yang
-> mengosongkan indeks**: ES memakai `_refresh`, driver lainnya membuat tulisan langsung
-> terlihat sehingga menjadi no-op. Untuk mengosongkan indeks, gunakan `delete_index`.
+> mengosongkan indeks**: ES memakai `_refresh`, XunSearch mengirim `CMD_INDEX_COMMIT`, dan
+> driver lainnya membuat tulisan langsung terlihat sehingga menjadi no-op. Untuk mengosongkan
+> indeks, gunakan `delete_index`.
 
 ### Beralih ke Elasticsearch / OpenSearch
 
@@ -312,9 +314,10 @@ let engine = EngineManager::new(config).engine()?;
 
 Konstruktor konfigurasi mesin lainnya ada di [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> Pada mesin SQLite (`database`), `total` dihitung di lapisan SQL (indeks + saring kasar LIKE);
-> setelah penyaringan wheres / hapus lunak di memori bisa terjadi `hits.len() < total`,
-> dan paginasi mengacu pada hits.
+> Pada mesin SQLite (`database`), `total` adalah jumlah hit **setelah penyaringan** (sama dengan
+> `CollectionEngine`): SQL hanya menjalankan indeks + saring kasar LIKE untuk mengambil kandidat,
+> sedangkan wheres / hapus lunak / pengurutan / paginasi semuanya di memori. Paginasi tidak bisa
+> diturunkan ke `LIMIT/OFFSET` SQL — baris yang cocok di luar jendela akan selamanya tak terjangkau.
 
 ### Field yang Dicadangkan
 
@@ -361,9 +364,11 @@ impl Searchable for Article {
 
 ## Hewan Peliharaan Proyek
 
-![Hewan peliharaan proyek: Scout si Search Hound](svg/pet.svg)
+![Hewan peliharaan proyek: Scout si Robot Pencari](svg/pet.svg)
 
-**Scout · si Search Hound** — mengendus dokumen, melacak indeks: di mana ada kueri, di situ ada dia.
+**Scout · Robot Pencari** — delapan slot modul di dadanya, pasang yang mana pun: kembangkan
+dengan driver in-memory tanpa dependensi, tukar ke backend apa pun di produksi, kode bisnis
+tak berubah.
 Versi gambarnya di [`svg/pet.svg`](svg/pet.svg); di terminal ia tampak seperti ini:
 
 ```console
@@ -372,27 +377,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 Hewan ini tinggal di modul [`rust_scout::pet`](../../../src/pet.rs) dan **tidak menambah dependensi apa pun**:

@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">Abstraksi driver — trait Engine satu-satunya sambungan</text>
-  <text x="118" y="246" class="desc">8 metode wajib + 5 dengan implementasi bawaan (13 total), asinkron lewat EngineFuture. Delapan backend berbagi satu kontrak: ganti backend = ubah konfigurasi.</text>
+  <text x="118" y="246" class="desc">6 metode wajib + 8 dengan implementasi bawaan (14 total), asinkron lewat EngineFuture. Delapan backend berbagi satu kontrak: ganti backend = ubah konfigurasi.</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // atau collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">Sederhana lebih dulu — bawaan tanpa dependensi</text>
-  <text x="118" y="454" class="desc">Driver in-memory bawaan langsung bisa dipakai, inti hanya bergantung pada serde / thiserror. Delapan backend di balik feature masing-masing: yang tak dipakai tidak dikompilasi.</text>
+  <text x="118" y="454" class="desc">Driver in-memory bawaan langsung bisa dipakai, inti hanya bergantung pada serde / serde_json / thiserror. Delapan backend di balik feature: yang tak dipakai tidak dikompilasi.</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">Batas keamanan — validasi input + escape output</text>
-  <text x="118" y="558" class="desc">Nama indeks divalidasi lewat validate_index_name (menolak spasi / garis miring / titik di awal), lalu index dan id di semua mesin HTTP dikodekan persen per RFC 3986.</text>
+  <text x="118" y="558" class="desc">Nama indeks divalidasi lewat validate_index_name (menolak spasi / garis miring / titik di awal, serta * ? , + dan -/_ di awal), lalu index dan id dikodekan persen per RFC 3986.</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

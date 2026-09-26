@@ -44,9 +44,10 @@
   <rect x="358" y="100" width="145" height="132" rx="10" class="node node-alt"/>
   <text x="430" y="124" text-anchor="middle" class="step">③ রিফ্রেশ</text>
   <text x="430" y="148" text-anchor="middle" class="name">flush</text>
-  <text x="430" y="172" text-anchor="middle" class="desc">no-op：collection/SQLite</text>
-  <text x="430" y="188" text-anchor="middle" class="desc">no-op：Meili/TS/Algolia</text>
-  <text x="430" y="204" text-anchor="middle" class="desc">_refresh：ES</text>
+  <text x="430" y="172" text-anchor="middle" class="desc">no-op: collection/SQLite</text>
+  <text x="430" y="188" text-anchor="middle" class="desc">no-op: Meili/TS/Algolia</text>
+  <text x="430" y="204" text-anchor="middle" class="desc">_refresh: ES</text>
+  <text x="430" y="220" text-anchor="middle" class="desc">CMD_INDEX_COMMIT: XunSearch</text>
   <line x1="503" y1="166" x2="518" y2="166" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow2)"/>
 
   <rect x="518" y="100" width="145" height="132" rx="10" class="node"/>
@@ -130,7 +131,7 @@
   <text x="74" y="467" class="rowlb">ডিফল্ট পৃষ্ঠা</text>
   <text x="207" y="467" class="cell">সব, id দিয়ে সাজানো</text>
   <text x="425" y="467" class="cell">size 10, _score দিয়ে</text>
-  <text x="643" y="467" class="cell">hits-ই মানদণ্ড</text>
+  <text x="643" y="467" class="cell">সব, id দিয়ে সাজানো</text>
   <text x="861" y="467" class="cell">খালি</text>
 
   <!-- সারি ৬: delete অর্থ -->
@@ -145,11 +146,12 @@
   <rect x="60" y="508" width="1007" height="30" rx="4" fill="#ffffff"/>
   <text x="74" y="527" class="rowlb">soft_delete</text>
   <text x="207" y="527" class="cell">হ্যাঁ (চিহ্ন বসায়)</text>
-  <text x="425" y="527" class="cell">হ্যাঁ (চিহ্ন বসায়)</text>
+  <text x="425" y="527" class="cell">হ্যাঁ (soft_delete_in)</text>
   <text x="643" y="527" class="cell">হ্যাঁ (ত্রি-অবস্থা ফিল্টার)</text>
   <text x="861" y="527" class="cell">না</text>
 
   <!-- ==================== ত্রুটির পথ ==================== -->
+  <text x="60" y="554" class="desc">XunSearch এই চার শ্রেণির বাইরে: এর flush হলো CMD_INDEX_COMMIT (ডিস্কে কমিট), no-op নয়।</text>
   <rect x="60" y="562" width="1007" height="58" rx="8" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
   <text x="74" y="584" class="lbl">ত্রুটির পথ — সব crate::Result&lt;T&gt;-এ মেশে</text>
   <text x="74" y="606" class="cell mono">InvalidIndexName · InvalidResult · Unsupported · Json · Http · Sqlx · Backend · XunSearch · XunSearchIo</text>

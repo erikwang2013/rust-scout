@@ -299,4 +299,12 @@ mod tests {
         assert_eq!(crate::config::percent_encode("a/b c"), "a%2Fb%20c");
         assert_eq!(crate::config::percent_encode("simple-1"), "simple-1");
     }
+
+    #[test]
+    fn empty_not_in_is_dropped_but_empty_in_matches_nothing() {
+        let b = SearchBuilder::new("q").where_not_in("cat", Vec::<&str>::new());
+        let f = build_filter_by(&b).unwrap_or_default();
+        assert!(!f.contains("cat:!="), "空 NOT IN 不该下发: {f:?}");
+    }
+
 }

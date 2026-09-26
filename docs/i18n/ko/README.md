@@ -12,9 +12,9 @@
 Typesense, Algolia, SQLite, XunSearch, Null)를 추상화한다: **개발 시에는 의존성 없는 메모리
 드라이버, 프로덕션에서는 아무 백엔드로나 매끄럽게 전환, 비즈니스 코드는 한 줄도 수정하지 않는다.**
 
-![프로젝트 펫: 탐색 사냥개 Scout](svg/pet.svg)
+![프로젝트 펫: 검색 로봇 Scout](svg/pet.svg)
 
-> 프로젝트 펫 **탐색 사냥개 Scout**(Search Hound) —— 문서를 맡고 색인을 쫓는다.
+> 프로젝트 펫 **검색 로봇 Scout** —— 가슴에 여덟 개의 모듈 슬롯, 꽂은 대로 쓰면 된다.
 > 문서 안뿐 아니라 터미널 배너와 에러 안내에도 등장한다. 자세한 내용은
 > [프로젝트 펫](#프로젝트-펫) 참고.
 
@@ -43,7 +43,7 @@ let result = engine.search(
 | 📦 벌크 작업 | `update_bulk` / `delete_bulk` 로 왕복 감소. `delete_in` 은 지정 색인만 정확히 삭제 |
 | 🔌 교체 가능한 드라이버 | 기본은 의존성 없음. 8가지 백엔드는 각자 feature 로 게이트되어 안 쓰는 것은 컴파일되지 않음 |
 | 🔒 안전 경계 | 색인 이름 검증(`validate_index_name`) + RFC 3986 퍼센트 인코딩으로 경로 주입 차단 |
-| 🐕 프로젝트 펫 | 탐색 사냥개 Scout: 터미널 배너 + 에러별 점검 힌트(`rust_scout::pet`) |
+| 🤖 프로젝트 펫 | 검색 로봇 Scout: 터미널 배너 + 에러별 점검 힌트(`rust_scout::pet`) |
 
 ## 아키텍처 설계
 
@@ -78,29 +78,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # crate 루트: 모듈 공개 + feature 게이트 재내보내기
 │   │
-│   ├── engine.rs           # Engine trait: 유일한 드라이버 계약 (필수 8 + 기본 구현 5)
+│   ├── engine.rs           # Engine trait: 유일한 드라이버 계약 (필수 6 + 기본 구현 8)
 │   ├── manager.rs          # EngineManager: 파사드, driver 로 분기하고 Arc<dyn Engine> 캐시
-│   ├── config.rs           # ScoutConfig (생성자 8개) + validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig (생성자 9개) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: 체인 쿼리
 │   ├── document.rs         # SearchDocument: 쓰기 문서 (serde JSON 계약)
 │   ├── result.rs           # SearchResult / SearchHit: 검색 결과
 │   ├── searchable.rs       # Searchable / SearchableStore: 비즈니스 모델 브리지
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # 프로젝트 펫: 탐색 사냥개 Scout (배너 + 에러 힌트)
+│   ├── pet.rs              # 프로젝트 펫: 검색 로봇 Scout (배너 + 에러 힌트)
 │   │
 │   ├── collection_engine.rs    # 메모리 드라이버 (기본, 의존성 없음)
 │   ├── null_engine.rs          # 널 드라이버: 쓰기를 버리고 항상 빈 결과        [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                       [elasticsearch]
-│   │   └── query.rs            #   query_string 생성과 응답 파싱
+│   ├── query.rs                #   query_string 생성과 응답 파싱
 │   ├── meilisearch_engine.rs   # Meilisearch (REST)                           [meilisearch]
 │   ├── typesense_engine.rs     # Typesense (REST)                             [typesense]
-│   │   └── typesense_query.rs  #   검색 파라미터와 filter_by 생성
+│   ├── typesense_query.rs      #   검색 파라미터와 filter_by 생성
 │   ├── algolia_engine.rs       # Algolia (관리형 클라우드 REST)                 [algolia]
 │   ├── database_engine.rs      # SQLite (sqlx, LIKE 1차 필터 + 메모리 정제)      [database]
 │   ├── xunsearch_engine.rs     # XunSearch: xunsearchd 네이티브 TCP 프로토콜     [xunsearch]
-│   │   ├── xunsearch_query.rs  #   패킷 코덱 + ini 필드 정의
-│   │   └── xunsearch_tests.rs  #   mock 서버를 사용한 E2E 테스트
+│   ├── xunsearch_query.rs      #   패킷 코덱 + ini 필드 정의
+│   ├── xunsearch_tests.rs      #   mock 서버를 사용한 E2E 테스트
 │   │
 │   └── (단위 테스트는 각 모듈 하단의 #[cfg(test)] mod tests 에 내장)
 ├── tests/                  # 통합 테스트 (현재 비어 있음, 테스트는 src 에 내장)
@@ -128,6 +128,7 @@ rust-scout/
 | XunSearch | 서버가 지원하는 정렬 필드는 하나뿐 | `order_by` 를 여러 개 주면 `Unsupported` 를 반환 |
 | XunSearch | 소프트 삭제 미구현 | `soft_delete` / `only_trashed` 는 `Unsupported` 를 반환 |
 | XunSearch | 색인 생성에는 필드 스킴 ini 가 필요 | `create_index` 는 `Unsupported` 를 반환(`XunSearchEngine::new` 에 ini 전달) |
+| 기본 개수 | `take` 를 지정하지 않으면 collection / database 는 **모든** 히트를 반환 | 나머지 여섯 드라이버는 기본적으로 **10** 개만 반환(각 백엔드의 관례적 상한) |
 
 의도적으로 맞춘 의미론이 두 가지 있다:
 
@@ -143,7 +144,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # 예제에서만 필요
 ```
 
@@ -245,8 +246,8 @@ engine.delete_index("books").await?;                           // 색인 삭제
 > 반환한다(조용히 아무것도 하지 않는 것이 아니라).
 >
 > `flush` 의 계약은 "쓰기 가시성 갱신"이고, **어떤 드라이버도 색인을 비우지 않는다**:
-> ES 는 `_refresh` 를 실행하고, 나머지 드라이버는 쓰기가 즉시 보이므로 no-op. 색인을
-> 비우려면 `delete_index` 를 사용한다.
+> ES 는 `_refresh` 를, XunSearch 는 `CMD_INDEX_COMMIT` 을 보내며, 나머지 드라이버는 쓰기가
+> 즉시 보이므로 no-op. 색인을 비우려면 `delete_index` 를 사용한다.
 
 ### Elasticsearch / OpenSearch 로 전환
 
@@ -307,8 +308,10 @@ let engine = EngineManager::new(config).engine()?;
 
 나머지 엔진의 설정 생성자는 [docs.rs](https://docs.rs/rust-scout) 참고: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> SQLite 엔진(`database`)의 `total` 은 SQL 계층 집계(색인 + LIKE 1차 필터)이며,
-> wheres / 소프트 삭제를 메모리에서 걸러내면 `hits.len() < total` 이 될 수 있다. 페이징은 hits 를 기준으로 한다.
+> SQLite 엔진(`database`)의 `total` 은 **필터 후** 히트 수이며(`CollectionEngine` 과 일치):
+> SQL 은 색인 + LIKE 1차 필터로 후보를 가져올 뿐이고, wheres / 소프트 삭제 / 정렬 / 페이징은
+> 모두 메모리에서 수행한다. 페이징은 SQL `LIMIT/OFFSET` 으로 내릴 수 없다 — 그러면 윈도우
+> 밖의 일치 행을 영영 가져올 수 없다.
 
 ### 예약 필드
 
@@ -353,9 +356,10 @@ impl Searchable for Article {
 
 ## 프로젝트 펫
 
-![프로젝트 펫: 탐색 사냥개 Scout](svg/pet.svg)
+![프로젝트 펫: 검색 로봇 Scout](svg/pet.svg)
 
-**Scout · 탐색 사냥개**(Search Hound) —— 문서를 맡고 색인을 쫓는다. 쿼리가 있는 곳에 늘 함께 있다.
+**Scout · 검색 로봇** —— 가슴에 여덟 개의 모듈 슬롯, 꽂은 대로 쓰면 된다: 개발은 의존성 없는
+메모리 드라이버, 프로덕션은 아무 백엔드로나 교체, 비즈니스 코드는 한 줄도 바뀌지 않는다.
 그림 버전은 [`svg/pet.svg`](svg/pet.svg), 터미널에서는 이렇게 보인다:
 
 ```console
@@ -364,27 +368,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 펫은 [`rust_scout::pet`](../../../src/pet.rs) 모듈에 살며 **어떤 의존성도 추가하지 않는다**:

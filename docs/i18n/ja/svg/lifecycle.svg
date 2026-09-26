@@ -47,6 +47,7 @@
   <text x="430" y="172" text-anchor="middle" class="desc">no-op：collection/SQLite</text>
   <text x="430" y="188" text-anchor="middle" class="desc">no-op：Meili/TS/Algolia</text>
   <text x="430" y="204" text-anchor="middle" class="desc">_refresh：ES</text>
+  <text x="430" y="220" text-anchor="middle" class="desc">CMD_INDEX_COMMIT：XunSearch</text>
   <line x1="503" y1="166" x2="518" y2="166" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow2)"/>
 
   <rect x="518" y="100" width="145" height="132" rx="10" class="node"/>
@@ -130,7 +131,7 @@
   <text x="74" y="467" class="rowlb">ページング既定</text>
   <text x="207" y="467" class="cell">全件取得、id 順に並べる</text>
   <text x="425" y="467" class="cell">size 10、_score 順</text>
-  <text x="643" y="467" class="cell">hits を基準に</text>
+  <text x="643" y="467" class="cell">全件取得、id 順に並べる</text>
   <text x="861" y="467" class="cell">空</text>
 
   <!-- 行 6 delete の意味 -->
@@ -145,11 +146,12 @@
   <rect x="60" y="508" width="1007" height="30" rx="4" fill="#ffffff"/>
   <text x="74" y="527" class="rowlb">soft_delete</text>
   <text x="207" y="527" class="cell">対応（フラグ付与）</text>
-  <text x="425" y="527" class="cell">対応（フラグ付与）</text>
+  <text x="425" y="527" class="cell">対応（soft_delete_in）</text>
   <text x="643" y="527" class="cell">対応（三態フィルタ）</text>
   <text x="861" y="527" class="cell">非対応</text>
 
   <!-- ==================== エラー経路 ==================== -->
+  <text x="60" y="554" class="desc">XunSearch はこの 4 類に含まれない：flush が no-op ではなく CMD_INDEX_COMMIT（コミット書き込み）だから。</text>
   <rect x="60" y="562" width="1007" height="58" rx="8" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
   <text x="74" y="584" class="lbl">エラー経路 —— すべて crate::Result&lt;T&gt; に収束</text>
   <text x="74" y="606" class="cell mono">InvalidIndexName · InvalidResult · Unsupported · Json · Http · Sqlx · Backend · XunSearch · XunSearchIo</text>

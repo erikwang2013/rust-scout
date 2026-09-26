@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">Driver Abstraction — Engine trait is the only seam</text>
-  <text x="118" y="246" class="desc">8 required methods + 5 defaulted (13 total), async via EngineFuture. Eight backends, one contract — switching backend = config.</text>
+  <text x="118" y="246" class="desc">6 required methods + 8 defaulted (14 total), async via EngineFuture. Eight backends, one contract — switching backend = config.</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // or collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">Simplicity First — Zero Dependencies by Default</text>
-  <text x="118" y="454" class="desc">Default in-memory driver, zero deps beyond serde / thiserror. Each backend is feature-gated — unused code never compiles.</text>
+  <text x="118" y="454" class="desc">Default in-memory driver, zero deps beyond serde / serde_json / thiserror. Each backend is feature-gated — unused code never compiles.</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">Safety Boundary — Input Validation + Output Escaping</text>
-  <text x="118" y="558" class="desc">Index names pass validate_index_name (rejecting blanks, slashes, leading dots); HTTP drivers then RFC 3986 percent-encode index and id.</text>
+  <text x="118" y="558" class="desc">Index names pass validate_index_name (rejecting blanks, path separators, leading dots, wildcards like * ? , + and reserved leading - / _); index and id are then RFC 3986 percent-encoded.</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

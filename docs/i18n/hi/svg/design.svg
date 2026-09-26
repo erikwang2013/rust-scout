@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">ड्राइवर एब्स्ट्रैक्शन — Engine trait ही एकमात्र सीम</text>
-  <text x="118" y="246" class="desc">8 अनिवार्य विधियाँ + 5 डिफ़ॉल्ट सहित (कुल 13), async EngineFuture से लौटता है। आठ बैकएंड, एक कॉन्ट्रैक्ट — बैकएंड बदलना = कॉन्फ़िग बदलना।</text>
+  <text x="118" y="246" class="desc">6 अनिवार्य विधियाँ + 8 डिफ़ॉल्ट सहित (कुल 14), async EngineFuture से लौटता है। आठ बैकएंड, एक कॉन्ट्रैक्ट — बैकएंड बदलना = कॉन्फ़िग बदलना।</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // या collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">सरलता पहले — डिफ़ॉल्ट शून्य-निर्भरता</text>
-  <text x="118" y="454" class="desc">डिफ़ॉल्ट इन-मेमोरी ड्राइवर तुरंत काम करता है, कोर केवल serde / thiserror पर निर्भर। आठ बैकएंड अपने feature से गेटेड — जो उपयोग नहीं होता वह कंपाइल नहीं होता।</text>
+  <text x="118" y="454" class="desc">डिफ़ॉल्ट इन-मेमोरी ड्राइवर तुरंत काम करता है, कोर केवल serde / serde_json / thiserror पर निर्भर। आठ बैकएंड अपने feature से गेटेड — जो उपयोग नहीं होता वह कंपाइल नहीं होता।</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">सुरक्षा सीमा — इनपुट सत्यापन + आउटपुट एस्केप</text>
-  <text x="118" y="558" class="desc">इंडेक्स नाम पहले validate_index_name से गुज़रता है (रिक्त स्थान / स्लैश / शुरुआती बिंदु अस्वीकृत); फिर सभी HTTP इंजनों के index और id RFC 3986 के अनुसार प्रतिशत-एनकोड होते हैं।</text>
+  <text x="118" y="558" class="desc">इंडेक्स नाम पहले validate_index_name से गुज़रता है (रिक्त स्थान, स्लैश, शुरुआती बिंदु, और * ? , + तथा शुरुआती - / _ अस्वीकृत); फिर HTTP इंजन index और id RFC 3986 के अनुसार प्रतिशत-एनकोड होते हैं।</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

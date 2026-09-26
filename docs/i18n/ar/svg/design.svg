@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">تجريد المحركات — trait Engine هو الوصلة الوحيدة</text>
-  <text x="118" y="246" class="desc">8 دوال إلزامية + 5 افتراضية (13 إجمالًا)، وتُعاد بشكل async عبر EngineFuture. ثماني خلفيات بعقد واحد — تبديل الخلفية = تغيير الإعداد.</text>
+  <text x="118" y="246" class="desc">6 دوال إلزامية + 8 افتراضية (14 إجمالًا)، وتُعاد بشكل async عبر EngineFuture. ثماني خلفيات بعقد واحد — تبديل الخلفية = تغيير الإعداد.</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // أو collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">البساطة أولًا — بلا اعتماديات افتراضيًا</text>
-  <text x="118" y="454" class="desc">محرك الذاكرة الافتراضي جاهز فورًا، والجوهر يعتمد على serde / thiserror فقط. وكل خلفية خلف ميزتها — ما لا تستخدمه لا يُصرَّف.</text>
+  <text x="118" y="454" class="desc">محرك الذاكرة الافتراضي جاهز فورًا، والجوهر يعتمد على serde / serde_json / thiserror فقط. وكل خلفية خلف ميزتها — ما لا تستخدمه لا يُصرَّف.</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">حدود الأمان — تحقق من الإدخال + تهريب الإخراج</text>
-  <text x="118" y="558" class="desc">يمر اسم الفهرس أولًا عبر validate_index_name (يرفض المسافات / الشرطة المائلة / النقطة البادئة)، ثم تُرمَّز index و id في كل محركات HTTP بايتًا بايتًا وفق RFC 3986.</text>
+  <text x="118" y="558" class="desc">يمر اسم الفهرس عبر validate_index_name (يرفض المسافات / الشرطة المائلة / النقطة البادئة، وأحرف البدل * ? , + والبادئة -/_ المحجوزة)، ثم تُرمَّز index و id في محركات HTTP وفق RFC 3986.</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

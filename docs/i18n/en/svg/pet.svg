@@ -1,226 +1,182 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 470" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="petTitle petDesc">
-  <title id="petTitle">rust-scout project pet: Scout the Search Hound</title>
-  <desc id="petDesc">An amber hound wearing a blue scout neckerchief, drawn in chibi proportions: big head, small body, four short thick legs planted on the ground. Long droopy ears, nose forward mid-sniff. A canvas satchel on its chest carries eight small colored badges, standing for the eight pluggable backends. A scent trail drifts from its nose rightward to a document, where a magnifier circles the matching line. A trail of paw prints leads in from behind.</desc>
+  <title id="petTitle">rust-scout project pet: Scout the Search Robot</title>
+  <desc id="petDesc">A small search robot. Rounded-square head, a dark visor with two round blue eyes and a smile arc below; a single antenna on top holding an amber indicator lamp, and a round stud on each cheek. White rounded torso, two thick legs, two round feet, standing on a ground shadow. The whole chest is the module bay: eight dark sockets in a 4×2 grid, the upper-right one empty — with a dashed amber placement outline inside it — and the other seven each holding a differently-coloured module: deep blue, green, light blue, mid blue, grey, pale amber, blue. An amber module floats just outside the empty socket, slightly tilted, two speed lines trailing behind it and a dashed arc curving from it into the socket: it is being inserted right now. The green socket to the left of the empty one glows with a green ring — that is the driver that matched this query. The left arm hangs holding a query card whose four lines are the chained SearchBuilder, the second line picked out in brand blue; the right arm hangs at the side, palm open toward the result panel. On the right of the frame a result panel lists four hits, one of them highlighted green, with a green check badge on its upper-right corner. Below, the nameplate: Scout · Search Robot.</desc>
 
   <defs>
     <style>
       .title { font-size: 24px; font-weight: 700; fill: #0f172a; }
       .sub   { font-size: 12.5px; fill: #64748b; }
 
-      /* 猎犬配色：琥珀系（与架构图 data 层同源），不引入第二套色板 */
-      .fur   { fill: #f7c873; }
-      .fur-m { fill: #eaa94f; }
-      .fur-d { fill: #d18b33; }
-      .fur-l { fill: #fbe3b4; }
-      .muzzle{ fill: #fde9c9; }
-      .ink   { fill: #0f172a; }
+      /* 机器人配色：白色/浅灰外壳 + 石板灰描边，与架构图同一套灰阶，不引入第二套色板 */
+      .body  { fill: #ffffff; stroke: #64748b; stroke-width: 3; }
+      .plate { fill: #e2e8f0; stroke: #64748b; stroke-width: 2.6; stroke-linejoin: round; }
+      .part  { fill: #cbd5e1; stroke: #64748b; stroke-width: 2.4; }
+      .visor { fill: #0f172a; }
+      .eye   { fill: #60a5fa; }
+      .lamp  { fill: #f59e0b; stroke: #64748b; stroke-width: 2.2; }
 
-      /* 描边族：与填充类组合使用（s = 主轮廓，s2 = 次要轮廓） */
-      .s     { stroke: #b06f22; stroke-width: 3;   stroke-linejoin: round; stroke-linecap: round; }
-      .s2    { stroke: #b06f22; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+      /* 手臂：两笔描边套出「浅灰管 + 石板灰轮廓」的效果 */
+      .limb-o { fill: none; stroke: #64748b; stroke-width: 17; stroke-linecap: round; }
+      .limb-i { fill: none; stroke: #cbd5e1; stroke-width: 12; stroke-linecap: round; }
 
-      .scarf { fill: #2563eb; }
-      .scarf-d { fill: #1d4ed8; }
+      /* 模块舱：浅色舱板 + 深色插槽，槽里嵌一枚彩色模块 */
+      .bay    { fill: #e2e8f0; stroke: #64748b; stroke-width: 2.4; }
+      .socket { fill: #0f172a; }
+      .glow   { fill: #10b981; opacity: 0.16; }
+      .ring   { fill: none; stroke: #10b981; stroke-width: 2.4; opacity: 0.6; }
+      .chip-mark { fill: #ffffff; opacity: 0.75; }
 
-      /* 侦察挎包：帆布色 + 石板灰轮廓，和猎犬的棕色描边区分开 */
-      .bag   { fill: #e2e8f0; stroke: #64748b; stroke-width: 2; stroke-linejoin: round; }
-      .flap  { fill: #cbd5e1; }
-      .strap { stroke: #64748b; stroke-width: 11; stroke-linecap: round; }
+      /* 正在插入的那一枚：空槽里的落位虚线框 + 飞行虚线弧 + 速度线，同色 */
+      .slot-empty { fill: none; stroke: #f59e0b; stroke-width: 1.8; stroke-dasharray: 3.5 3; opacity: 0.85; }
+      .arc  { fill: none; stroke: #f59e0b; stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 5 4.5; }
+      .tick { fill: none; stroke: #f59e0b; stroke-width: 2.4; stroke-linecap: round; }
+      .wire { fill: none; stroke: #64748b; stroke-width: 3; stroke-linecap: round; }
 
-      .paw   { fill: currentColor; }
-      .sniff { fill: none; stroke: #94a3b8; stroke-width: 2.5; stroke-linecap: round; }
-
-      .card  { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
-      .line  { fill: #e2e8f0; }
-      .line-hi { fill: #f59e0b; }
-      .head  { fill: #cbd5e1; }
-      .glass { fill: #dbeafe; fill-opacity: 0.45; }
-      .rim   { fill: none; stroke: #2563eb; stroke-width: 9; }
-      .handle{ stroke: #2563eb; stroke-width: 13; stroke-linecap: round; }
-      .badge { fill: #10b981; }
+      /* 查询卡片 / 结果面板 */
+      .card   { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .card-h { fill: #cbd5e1; }
+      .cl     { fill: #e2e8f0; }
+      .cl-hi  { fill: #2563eb; }
+      .cl-ok  { fill: #10b981; }
+      .badge  { fill: #10b981; }
 
       .name  { font-size: 16px; font-weight: 700; fill: #0f172a; }
       .role  { font-size: 11.5px; fill: #64748b; }
     </style>
 
-    <!-- 爪印：一个形状复用四次，颜色由 <use> 的 color 决定 -->
-    <g id="pawMark">
-      <ellipse cx="0" cy="5" rx="7.5" ry="6" class="paw"/>
-      <ellipse cx="-8.5" cy="-5" rx="3.4" ry="4" class="paw"/>
-      <ellipse cx="-2.8" cy="-9.5" rx="3.4" ry="4" class="paw"/>
-      <ellipse cx="3.4" cy="-9.5" rx="3.4" ry="4" class="paw"/>
-      <ellipse cx="9" cy="-5" rx="3.4" ry="4" class="paw"/>
+    <!-- 一枚模块：一个形状复用九次，颜色由 <use> 自己的 fill 决定 -->
+    <g id="chip">
+      <rect x="-12" y="-12" width="24" height="24" rx="5"/>
+      <rect class="chip-mark" x="-7" y="-7.5" width="14" height="4" rx="2"/>
     </g>
   </defs>
 
   <text x="280" y="38" text-anchor="middle" class="title">rust-scout Project Pet</text>
-  <text x="280" y="60" text-anchor="middle" class="sub">Search Hound Scout · 8 backends, one Engine trait, business code unchanged</text>
+  <text x="280" y="60" text-anchor="middle" class="sub">Search Robot Scout · eight module slots, plug in any backend, code unchanged</text>
 
-  <!-- ============ 地面投影：一只狗、一沓纸 ============ -->
-  <ellipse cx="130" cy="366" rx="90" ry="7" fill="#64748b" opacity="0.10"/>
-  <ellipse cx="462" cy="362" rx="76" ry="7" fill="#64748b" opacity="0.10"/>
+  <!-- ============ 地面投影 ============ -->
+  <ellipse cx="250" cy="374" rx="120" ry="8" fill="#64748b" opacity="0.10"/>
 
-  <!-- ============ 爪印小径：从画面左下延伸至猎犬后脚边 ============ -->
-  <use href="#pawMark" transform="translate(96,382) rotate(-16) scale(1)"    color="#d18b33" opacity="0.80"/>
-  <use href="#pawMark" transform="translate(68,394) rotate(-6)  scale(0.94)" color="#eaa94f" opacity="0.62"/>
-  <use href="#pawMark" transform="translate(38,402) rotate(6)   scale(0.86)" color="#f0c37f" opacity="0.44"/>
-  <use href="#pawMark" transform="translate(10,398) rotate(16)  scale(0.78)" color="#f7d9a8" opacity="0.30"/>
+  <!-- ============ 机器人（局部坐标即画布坐标，脚底 y≈372） ============ -->
 
-  <!-- ============ 气味轨迹：鼻尖 → 文档，由灰转琥珀 ============ -->
-  <path class="sniff" opacity="0.85" d="M 342,190 Q 354,204 344,218"/>
-  <path class="sniff" opacity="0.62" d="M 344,206 Q 362,222 350,240"/>
-  <path class="sniff" opacity="0.42" d="M 348,226 Q 372,242 360,264"/>
-  <circle cx="368" cy="220" r="4.0" fill="#94a3b8" opacity="0.60"/>
-  <circle cx="382" cy="236" r="5.0" fill="#94a3b8" opacity="0.72"/>
-  <circle cx="394" cy="250" r="6.0" fill="#f0b048" opacity="0.80"/>
-  <circle cx="406" cy="266" r="7.0" fill="#f59e0b" opacity="0.95"/>
-
-  <!-- ============ 被嗅到的文档：斜插在地上，命中行被放大镜圈住 ============ -->
-  <g transform="rotate(-3 466 297)">
-    <rect x="386" y="228" width="142" height="122" rx="10" class="card" stroke="#e2e8f0"/>
-    <rect x="394" y="236" width="144" height="122" rx="10" class="card"/>
-    <rect x="412" y="254" width="62"  height="10" rx="5"   class="head"/>
-    <rect x="412" y="276" width="100" height="7"  rx="3.5" class="line"/>
-    <rect x="412" y="292" width="86"  height="7"  rx="3.5" class="line"/>
-    <rect x="412" y="308" width="104" height="7"  rx="3.5" class="line-hi"/>
-    <rect x="412" y="324" width="72"  height="7"  rx="3.5" class="line"/>
+  <!-- 两条腿与脚掌：先画，再被躯干压住上沿 -->
+  <g class="plate">
+    <rect x="202" y="320" width="32" height="40" rx="14"/>
+    <rect x="266" y="320" width="32" height="40" rx="14"/>
+  </g>
+  <g class="part">
+    <rect x="194" y="352" width="48" height="20" rx="10"/>
+    <rect x="258" y="352" width="48" height="20" rx="10"/>
   </g>
 
-  <!-- 命中徽标 -->
-  <circle cx="526" cy="240" r="15" class="badge"/>
-  <path d="M 518,240 L 524,247 L 535,233" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 脖子：藏在躯干与脑袋之间 -->
+  <rect x="232" y="194" width="36" height="26" rx="9" class="part"/>
 
-  <!-- 放大镜：圈住那一行命中 -->
-  <circle cx="416" cy="288" r="40" class="glass"/>
-  <path class="handle" d="M 441,320 L 484,352"/>
-  <circle cx="416" cy="288" r="40" class="rim"/>
+  <!-- 躯干 -->
+  <rect x="158" y="214" width="184" height="120" rx="30" class="body"/>
 
-    <!-- ============ 猎犬本体（局部坐标：原点 = 脚掌落地点，地面 y=0） ============
-       Q 版比例：头连耳约占全身高的 45%，身体宽约为头宽的 1.3 倍，
-       颈短（头几乎直接坐在身上），四条短粗腿，每只脚都有脚掌与脚趾。 -->
-  <g transform="translate(150,364)">
+  <!-- 模块舱：整块胸膛就是一排插槽 —— 全图的重点 -->
+  <rect x="169" y="229" width="162" height="92" rx="15" class="bay"/>
 
-    <!-- 尾巴：粗根细梢，向左后方甩出上扬；弧线走在垂耳左外侧，免得被耳朵吃掉 -->
-    <path class="fur-m s2" d="M -34,-70
-      C -50,-78 -62,-88 -66,-98
-      C -69,-106 -64,-113 -57,-110
-      C -50,-107 -48,-99 -50,-90
-      C -52,-82 -46,-73 -34,-70 Z"/>
+  <!-- 亮着的那个槽（进程内驱动命中）：先铺光晕，再把插槽压在光晕上 -->
+  <rect x="210" y="235" width="42" height="42" rx="13" class="glow"/>
+  <rect x="210" y="235" width="42" height="42" rx="13" class="ring"/>
 
-    <!-- 远侧两条腿：压深一档，退到身体后面 -->
-    <g class="fur-d">
-      <rect x="-47" y="-52" width="18" height="40" rx="7"/>
-      <ellipse cx="-38" cy="-8" rx="11" ry="8"/>
-      <circle cx="-29" cy="-14" r="3.2"/>
-      <circle cx="-27" cy="-8"  r="3.2"/>
-      <circle cx="-29" cy="-2"  r="3.2"/>
-      <rect x="9" y="-52" width="18" height="40" rx="7"/>
-      <ellipse cx="18" cy="-8" rx="11" ry="8"/>
-      <circle cx="27" cy="-14" r="3.2"/>
-      <circle cx="29" cy="-8"  r="3.2"/>
-      <circle cx="27" cy="-2"  r="3.2"/>
-    </g>
-
-    <!-- 近侧两条腿：与远侧同形，浅一档压在前面 -->
-    <g class="fur s">
-      <rect x="-23" y="-52" width="18" height="40" rx="7"/>
-      <ellipse cx="-14" cy="-8" rx="11" ry="8"/>
-      <circle cx="-5" cy="-14" r="3.2"/>
-      <circle cx="-3" cy="-8"  r="3.2"/>
-      <circle cx="-5" cy="-2"  r="3.2"/>
-      <rect x="33" y="-52" width="18" height="40" rx="7"/>
-      <ellipse cx="42" cy="-8" rx="11" ry="8"/>
-      <circle cx="51" cy="-14" r="3.2"/>
-      <circle cx="53" cy="-8"  r="3.2"/>
-      <circle cx="51" cy="-2"  r="3.2"/>
-    </g>
-
-    <!-- 身体：小而紧凑的椭圆 -->
-    <path class="fur s" d="M -34,-80
-      C -12,-86 24,-86 42,-77
-      C 53,-70 55,-52 47,-42
-      C 39,-33 12,-29 -8,-31
-      C -30,-33 -49,-41 -49,-55
-      C -49,-69 -45,-78 -34,-80 Z"/>
-
-    <!-- 体积暗示：浅色胸口 + 胸侧与臀部的软阴影 -->
-    <ellipse cx="34" cy="-54" rx="17" ry="11" class="fur-l" opacity="0.7"/>
-    <path class="fur-m" opacity="0.45" d="M 38,-78 C 45,-70 46,-58 41,-48 C 35,-39 26,-34 16,-32 C 27,-40 34,-50 36,-60 C 38,-70 37,-75 34,-80 Z"/>
-    <path class="fur-m" opacity="0.4" d="M -49,-54 C -49,-67 -44,-76 -34,-80 C -42,-74 -45,-64 -45,-54 C -45,-44 -41,-36 -34,-31 C -44,-34 -49,-43 -49,-54 Z"/>
-
-    <!-- 侦察挎包：翻盖上缘贴着背线，包身挂在体侧，八枚徽章分两排 -->
-    <rect x="-32" y="-82" width="64" height="17" rx="7" class="bag"/>
-    <rect x="-6"  y="-79" width="12" height="9"  rx="2.4" fill="#f59e0b" stroke="#64748b" stroke-width="1.6"/>
-    <rect x="-30" y="-66" width="60" height="34" rx="5" class="bag"/>
-    <g>
-      <rect x="-26"   y="-62" width="12" height="10" rx="2.4" fill="#2563eb"/>
-      <rect x="-12.5" y="-62" width="12" height="10" rx="2.4" fill="#10b981"/>
-      <rect x="1"     y="-62" width="12" height="10" rx="2.4" fill="#f59e0b"/>
-      <rect x="14.5"  y="-62" width="12" height="10" rx="2.4" fill="#64748b"/>
-      <rect x="-26"   y="-50" width="12" height="10" rx="2.4" fill="#10b981"/>
-      <rect x="-12.5" y="-50" width="12" height="10" rx="2.4" fill="#f59e0b"/>
-      <rect x="1"     y="-50" width="12" height="10" rx="2.4" fill="#64748b"/>
-      <rect x="14.5"  y="-50" width="12" height="10" rx="2.4" fill="#2563eb"/>
-    </g>
-
-    <!-- 远侧垂耳：落在头后面，从左下露出一档 -->
-    <path class="fur-d s2" d="M 8,-147
-      C -10,-153 -25,-143 -27,-123
-      C -29,-107 -21,-99 -13,-103
-      C -5,-107 -3,-118 -5,-130
-      C -6,-139 -1,-144 8,-147 Z"/>
-
-    <!-- 侦察兵领巾：绕过颈根，上缘被头挡住，下缘落在胸口，结与飘带垂在喉前 -->
-    <path class="scarf-d" d="M -30,-100 C -10,-96 12,-94 32,-95 L 27,-83 C 8,-82 -12,-85 -32,-89 Z"/>
-    <path class="scarf"   d="M -30,-107 C -10,-104 12,-102 30,-103 L 27,-94 C 8,-93 -12,-96 -32,-99 Z"/>
-    <path class="scarf"   d="M 28,-102 C 30,-88 30,-76 28,-67 L 41,-65 C 44,-76 44,-90 42,-104 Z"/>
-    <path class="scarf-d" d="M 41,-103 C 44,-90 46,-80 47,-71 L 58,-76 C 56,-84 52,-94 50,-105 Z"/>
-    <path class="scarf-d" d="M 26,-105 C 33,-100 41,-98 49,-100 C 45,-106 34,-109 26,-105 Z"/>
-
-    <!-- 头：大颅骨 + 短口鼻，一条连续轮廓 -->
-    <path class="fur s" d="M -26,-120
-      C -30,-142 -14,-154 6,-154
-      C 28,-154 44,-144 46,-126
-      C 47,-119 51,-115 58,-112
-      C 65,-109 67,-101 61,-96
-      C 53,-90 40,-91 30,-95
-      C 20,-99 8,-102 -2,-105
-      C -16,-109 -25,-111 -26,-120 Z"/>
-
-    <!-- 口鼻：浅色吻部 + 鼻头 + 嘴线 -->
-    <path class="muzzle s2" d="M 41,-123
-      C 49,-119 56,-115 61,-111
-      C 66,-107 66,-100 60,-96
-      C 53,-92 45,-93 41,-97
-      C 37,-102 37,-117 41,-123 Z"/>
-    <ellipse cx="62" cy="-105" rx="8" ry="7" class="ink" transform="rotate(-12 62 -105)"/>
-    <ellipse cx="59.6" cy="-107.4" rx="2.4" ry="1.8" fill="#ffffff" opacity="0.55"/>
-    <path d="M 54,-94 C 59,-89 63,-89 66,-93" fill="none" stroke="#b06f22" stroke-width="2.2" stroke-linecap="round"/>
-
-    <!-- 大眼睛 + 眉毛（Q 版：眼睛相对头更大） -->
-    <ellipse cx="22"  cy="-126" rx="11"  ry="11.5" class="ink"/>
-    <ellipse cx="0"   cy="-130" rx="9"   ry="9.5"  class="ink"/>
-    <circle  cx="26"  cy="-130" r="4"   fill="#ffffff" opacity="0.92"/>
-    <circle  cx="3.5" cy="-134" r="3.2" fill="#ffffff" opacity="0.92"/>
-    <path d="M 12,-143 Q 22,-150 33,-145" fill="none" stroke="#d18b33" stroke-width="4"   stroke-linecap="round"/>
-    <path d="M -11,-147 Q -1,-154 9,-150" fill="none" stroke="#d18b33" stroke-width="3.4" stroke-linecap="round"/>
-
-    <!-- 近侧垂耳（头前面）：内耳压深一档，耳根起自头顶 -->
-    <path class="fur s2" d="M -2,-151
-      C -24,-158 -40,-146 -42,-124
-      C -44,-106 -36,-96 -26,-100
-      C -16,-104 -13,-116 -15,-129
-      C -17,-141 -12,-148 -2,-151 Z"/>
-    <path class="fur-d" d="M -6,-143
-      C -24,-149 -36,-138 -38,-122
-      C -39,-108 -33,-100 -26,-104
-      C -19,-108 -18,-117 -20,-128
-      C -21,-137 -16,-141 -6,-143 Z"/>
+  <!-- 八个插槽：4×2。右上角那个（292,241）空着，等着飞进来的那一枚 -->
+  <g class="socket">
+    <rect x="178" y="241" width="30" height="30" rx="7"/>
+    <rect x="216" y="241" width="30" height="30" rx="7"/>
+    <rect x="254" y="241" width="30" height="30" rx="7"/>
+    <rect x="292" y="241" width="30" height="30" rx="7"/>
+    <rect x="178" y="279" width="30" height="30" rx="7"/>
+    <rect x="216" y="279" width="30" height="30" rx="7"/>
+    <rect x="254" y="279" width="30" height="30" rx="7"/>
+    <rect x="292" y="279" width="30" height="30" rx="7"/>
   </g>
 
-<!-- ============ 名牌 ============ -->
-  <rect x="150" y="402" width="200" height="44" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
-  <use href="#pawMark" transform="translate(178,424) scale(1.15)" color="#eaa94f"/>
+  <!-- 右上角空槽里的落位虚线框：飞行中的那一枚就是落进这里 -->
+  <rect x="295" y="244" width="24" height="24" rx="5" class="slot-empty"/>
+
+  <!-- 七个已插入的模块 -->
+  <use href="#chip" transform="translate(193,256)" fill="#2563eb"/>
+  <use href="#chip" transform="translate(231,256)" fill="#10b981"/>
+  <use href="#chip" transform="translate(269,256)" fill="#93c5fd"/>
+  <use href="#chip" transform="translate(193,294)" fill="#60a5fa"/>
+  <use href="#chip" transform="translate(231,294)" fill="#94a3b8"/>
+  <use href="#chip" transform="translate(269,294)" fill="#fde68a"/>
+  <use href="#chip" transform="translate(307,294)" fill="#3b82f6"/>
+
+  <!-- ============ 脑袋 ============ -->
+  <!-- 天线 -->
+  <path class="wire" d="M 250,118 L 250,96"/>
+  <circle cx="250" cy="90" r="7" class="lamp"/>
+
+  <rect x="186" y="118" width="128" height="84" rx="30" class="body"/>
+
+  <!-- 两颊的耳栓 -->
+  <circle cx="183" cy="152" r="9" class="part"/>
+  <circle cx="317" cy="152" r="9" class="part"/>
+
+  <!-- 面罩 + 两只眼 + 微笑 -->
+  <rect x="200" y="142" width="100" height="34" rx="17" class="visor"/>
+  <circle cx="226" cy="159" r="7.5" class="eye"/>
+  <circle cx="274" cy="159" r="7.5" class="eye"/>
+  <circle cx="223.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
+  <circle cx="271.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
+  <path d="M 238,186 Q 250,195 262,186" fill="none" stroke="#64748b" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- ============ 手臂与手 ============ -->
+  <!-- 左臂：垂下去托查询卡片 -->
+  <path class="limb-o" d="M 170,246 L 146,296"/>
+  <path class="limb-i" d="M 170,246 L 146,296"/>
+  <!-- 右臂：垂在体侧，手掌摊向结果面板 —— 别挡住那条飞行弧线 -->
+  <path class="limb-o" d="M 332,246 L 370,300"/>
+  <path class="limb-i" d="M 332,246 L 370,300"/>
+
+  <!-- ============ 查询卡片：链式 SearchBuilder，第二行是当前那一步 ============ -->
+  <rect x="22" y="284" width="120" height="76" rx="9" class="card"/>
+  <rect x="32" y="296" width="46" height="6" rx="3" class="card-h"/>
+  <rect x="32" y="310" width="88" height="4.5" rx="2.25" class="cl"/>
+  <rect x="32" y="320" width="76" height="4.5" rx="2.25" class="cl-hi"/>
+  <rect x="32" y="330" width="94" height="4.5" rx="2.25" class="cl"/>
+  <rect x="32" y="340" width="62" height="4.5" rx="2.25" class="cl"/>
+
+  <circle cx="143" cy="300" r="11" class="part"/>
+  <circle cx="372" cy="304" r="11" class="part"/>
+
+  <!-- ============ 正在插入的那一枚琥珀色模块 ============
+       悬在右上角空槽的外侧、带一点倾角：身后两道速度线，左下拖出一条
+       虚线弧直接弯进空槽，槽里留着它的落位虚线框 —— 这一枚正在插入。 -->
+  <path class="tick" d="M 366,182 L 374,171" opacity="0.55"/>
+  <path class="tick" d="M 371,190 L 379,179" opacity="0.35"/>
+
+  <use href="#chip" transform="translate(350,202) rotate(-14)" fill="#f59e0b"/>
+
+  <path class="arc" d="M 342,220 Q 316,222 310,240"/>
+
+  <!-- ============ 结果面板 ============ -->
+  <rect x="384" y="254" width="150" height="88" rx="11" class="card"/>
+  <rect x="396" y="270" width="54" height="6" rx="3" class="card-h"/>
+  <rect x="396" y="285" width="112" height="5" rx="2.5" class="cl"/>
+  <rect x="396" y="297" width="104" height="5" rx="2.5" class="cl-ok"/>
+  <rect x="396" y="309" width="118" height="5" rx="2.5" class="cl"/>
+  <rect x="396" y="321" width="82" height="5" rx="2.5" class="cl"/>
+
+  <circle cx="528" cy="258" r="13" class="badge"/>
+  <path d="M 521.5,258 L 526.4,264 L 535.6,252" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- ============ 名牌：八个小方格，右上角那个空着，和胸前一样 ============ -->
+  <rect x="136" y="402" width="228" height="44" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <g>
+    <rect x="149" y="416" width="7" height="7" rx="2" fill="#2563eb"/>
+    <rect x="158" y="416" width="7" height="7" rx="2" fill="#10b981"/>
+    <rect x="167" y="416" width="7" height="7" rx="2" fill="#93c5fd"/>
+    <rect x="176" y="416" width="7" height="7" rx="2" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <rect x="149" y="425" width="7" height="7" rx="2" fill="#60a5fa"/>
+    <rect x="158" y="425" width="7" height="7" rx="2" fill="#94a3b8"/>
+    <rect x="167" y="425" width="7" height="7" rx="2" fill="#fde68a"/>
+    <rect x="176" y="425" width="7" height="7" rx="2" fill="#3b82f6"/>
+  </g>
   <text x="198" y="420" class="name">Scout</text>
-  <text x="198" y="437" class="role">Search Hound</text>
+  <text x="198" y="437" class="role">Search Robot</text>
 </svg>

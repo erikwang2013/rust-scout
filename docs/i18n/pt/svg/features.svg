@@ -87,8 +87,8 @@
   <text x="856" y="297" text-anchor="middle" class="ico-t">S</text>
   <text x="884" y="289" class="name">Eliminação Lógica</text>
   <text x="884" y="307" class="desc">campo __soft_deleted</text>
-  <text x="838" y="339" class="desc">Excluído por padrão; a consulta</text>
-  <text x="838" y="355" class="desc">pode incluí-lo ou vê-lo só ele.</text>
+  <text x="838" y="339" class="desc">soft_delete_in põe a marca;</text>
+  <text x="838" y="355" class="desc">a consulta pode vê-lo ou incluí-lo.</text>
   <text x="838" y="383" class="api">.with_trashed()/.only_trashed()</text>
 
   <!-- ========== Linha 3: índices e drivers ========== -->
@@ -115,9 +115,9 @@
   <text x="596" y="454" text-anchor="middle" class="ico-t">D</text>
   <text x="624" y="446" class="name">Drivers Plugáveis</text>
   <text x="624" y="464" class="desc">8 backends</text>
-  <text x="578" y="496" class="desc">collection · elasticsearch ·</text>
-  <text x="578" y="512" class="desc">meilisearch · typesense · algolia</text>
-  <text x="578" y="540" class="api">ScoutConfig::meilisearch(..)</text>
+  <text x="578" y="496" class="desc">collection, elasticsearch,</text>
+  <text x="578" y="512" class="desc">meilisearch, typesense, algolia,</text>
+  <text x="578" y="528" class="desc">database, xunsearch, null</text>
 
   <rect x="820" y="414" width="240" height="142" rx="10" class="card"/>
   <rect x="838" y="430" width="36" height="36" rx="8" class="ico"/>

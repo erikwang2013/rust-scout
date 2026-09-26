@@ -34,8 +34,9 @@ pub trait Engine: Send + Sync {
     /// 刷新索引，让已写入的文档对搜索可见。
     ///
     /// **不是清空索引** —— 要删除索引用 [`Self::delete_index`]。默认实现是
-    /// no-op（校验索引名后直接返回）：除 ES 外所有后端写入即对查询可见，
-    /// 没有「刷新」这一步。只有 ES 需要覆写成 `_refresh`。
+    /// no-op（校验索引名后直接返回）。只有两个驱动需要覆写：
+    /// ES 走 `_refresh`，XunSearch 发 `CMD_INDEX_COMMIT`；其余后端写入即对
+    /// 查询可见，没有「刷新」这一步。
     ///
     /// 曾有三个驱动把它接到了清空接口上（Meilisearch `delete-all`、
     /// Typesense 删集合、Algolia `/clear`），而 README 的生命周期示例在

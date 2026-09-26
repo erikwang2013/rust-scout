@@ -12,9 +12,9 @@
 Typesense、Algolia、SQLite、XunSearch、Null）を抽象化する：**開発時は依存ゼロのメモリドライバ、
 本番では任意のバックエンドへシームレスに切り替え、業務コードは一行も変えない。**
 
-![プロジェクトのペット：嗅探猟犬 Scout](svg/pet.svg)
+![プロジェクトのペット：検索ロボット Scout](svg/pet.svg)
 
-> プロジェクトのペット **嗅探猟犬 Scout**（Search Hound）—— 書類を嗅ぎ、索引を追う。
+> プロジェクトのペット **検索ロボット Scout** —— 胸に八つのモジュールスロット、挿したものを使う。
 > ドキュメントの中だけでなく、ターミナルのバナーやエラー表示にも現れる。詳しくは
 > [プロジェクトのペット](#プロジェクトのペット) を参照。
 
@@ -43,7 +43,7 @@ let result = engine.search(
 | 📦 バッチ操作 | `update_bulk` / `delete_bulk` で往復を削減。`delete_in` は指定索引に限定して削除 |
 | 🔌 プラガブルドライバ | 既定は依存ゼロ。8 種のバックエンドはそれぞれ feature ゲートされ、不要なものはコンパイルされない |
 | 🔒 安全境界 | 索引名の検証（`validate_index_name`）+ RFC 3986 パーセント符号化でパス注入を防ぐ |
-| 🐕 プロジェクトのペット | 嗅探猟犬 Scout：ターミナルバナー + エラーごとの調査ヒント（`rust_scout::pet`） |
+| 🤖 プロジェクトのペット | 検索ロボット Scout：ターミナルバナー + エラーごとの調査ヒント（`rust_scout::pet`） |
 
 ## アーキテクチャ設計
 
@@ -78,29 +78,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # crate ルート：モジュール公開 + feature ゲート付き再エクスポート
 │   │
-│   ├── engine.rs           # Engine trait：唯一のドライバ契約（必須 8 + 既定実装 5）
+│   ├── engine.rs           # Engine trait：唯一のドライバ契約（必須 6 + 既定実装 8）
 │   ├── manager.rs          # EngineManager：ファサード、driver で振り分け Arc<dyn Engine> をキャッシュ
-│   ├── config.rs           # ScoutConfig（8 コンストラクタ）+ validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig（9 コンストラクタ）+ validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter：チェーンクエリ
 │   ├── document.rs         # SearchDocument：書き込み文書（serde JSON 契約）
 │   ├── result.rs           # SearchResult / SearchHit：検索結果
 │   ├── searchable.rs       # Searchable / SearchableStore：業務モデルのブリッジ
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # プロジェクトのペット：嗅探猟犬 Scout（バナー + エラーヒント）
+│   ├── pet.rs              # プロジェクトのペット：検索ロボット Scout（バナー + エラーヒント）
 │   │
 │   ├── collection_engine.rs    # メモリドライバ（既定、依存ゼロ）
 │   ├── null_engine.rs          # 空ドライバ：書き込みを捨て、常に空結果        [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch（REST）                    [elasticsearch]
-│   │   └── query.rs            #   query_string の構築とレスポンス解析
+│   ├── query.rs                #   query_string の構築とレスポンス解析
 │   ├── meilisearch_engine.rs   # Meilisearch（REST）                        [meilisearch]
 │   ├── typesense_engine.rs     # Typesense（REST）                          [typesense]
-│   │   └── typesense_query.rs  #   検索パラメータと filter_by の構築
+│   ├── typesense_query.rs      #   検索パラメータと filter_by の構築
 │   ├── algolia_engine.rs       # Algolia（マネージドクラウド REST）          [algolia]
 │   ├── database_engine.rs      # SQLite（sqlx、LIKE 粗ふるい + メモリ精査）    [database]
 │   ├── xunsearch_engine.rs     # XunSearch：xunsearchd ネイティブ TCP プロトコル [xunsearch]
-│   │   ├── xunsearch_query.rs  #   パケットの符号化と ini フィールド定義
-│   │   └── xunsearch_tests.rs  #   mock サーバーを使った E2E テスト
+│   ├── xunsearch_query.rs      #   パケットの符号化と ini フィールド定義
+│   ├── xunsearch_tests.rs      #   mock サーバーを使った E2E テスト
 │   │
 │   └── (ユニットテストは各モジュール末尾の #[cfg(test)] mod tests に内蔵)
 ├── tests/                  # 結合テスト（現在は空、テストは src に内蔵）
@@ -128,6 +128,7 @@ rust-scout/
 | XunSearch | サーバーが扱えるソートフィールドは 1 つだけ | `order_by` を複数指定すると `Unsupported` を返す |
 | XunSearch | ソフト削除は未実装 | `soft_delete` / `only_trashed` は `Unsupported` を返す |
 | XunSearch | 索引の作成にはフィールド定義の ini が必要 | `create_index` は `Unsupported` を返す（`XunSearchEngine::new` に ini を渡す） |
+| 既定件数 | `take` を渡さない場合、collection / database は**すべて**の命中を返す | 残り六つのドライバは既定で **10** 件だけ返す（各バックエンドの慣例的な上限） |
 
 意図的に意味論をそろえている点が 2 つある：
 
@@ -143,7 +144,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # サンプルでのみ必要
 ```
 
@@ -245,8 +246,8 @@ engine.delete_index("books").await?;                           // 索引を削�
 > を返す（黙って何もしないのではなく）。
 >
 > `flush` の契約は「書き込みの可視性を更新する」ことで、**どのドライバも索引を空にしない**：
-> ES は `_refresh` を実行し、他のドライバは書き込みが即時可視なので no-op。索引を空にする
-> には `delete_index` を使う。
+> ES は `_refresh`、XunSearch は `CMD_INDEX_COMMIT` を送り、他のドライバは書き込みが即時可視
+> なので no-op。索引を空にするには `delete_index` を使う。
 
 ### Elasticsearch / OpenSearch への切り替え
 
@@ -307,8 +308,10 @@ let engine = EngineManager::new(config).engine()?;
 
 その他のエンジンの設定コンストラクタは [docs.rs](https://docs.rs/rust-scout) を参照：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
-> SQLite エンジン（`database`）の `total` は SQL 層の件数（索引 + LIKE 粗ふるい）であり、
-> wheres / ソフト削除をメモリで絞り込むと `hits.len() < total` になりうる。ページングは hits を基準とする。
+> SQLite エンジン（`database`）の `total` は**フィルタ後**のヒット数（`CollectionEngine`
+> と一致）：SQL は索引 + LIKE の粗ふるいで候補を取るだけで、wheres / ソフト削除 / ソート /
+> ページングはすべてメモリで行う。ページングは SQL の `LIMIT/OFFSET` に押し下げられない——
+> そうするとウィンドウ外の一致行を永久に取れなくなる。
 
 ### 予約フィールド
 
@@ -353,9 +356,10 @@ impl Searchable for Article {
 
 ## プロジェクトのペット
 
-![プロジェクトのペット：嗅探猟犬 Scout](svg/pet.svg)
+![プロジェクトのペット：検索ロボット Scout](svg/pet.svg)
 
-**Scout · 嗅探猟犬**（Search Hound）—— 書類を嗅ぎ、索引を追う。クエリのあるところに必ずいる。
+**Scout · 検索ロボット** —— 胸に八つのモジュールスロット、挿したものを使う：開発は依存ゼロの
+メモリドライバ、本番は任意のバックエンドへ、業務コードは一行も変えない。
 イラスト版は [`svg/pet.svg`](svg/pet.svg)、ターミナルではこう見える：
 
 ```console
@@ -364,27 +368,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 ペットは [`rust_scout::pet`](../../../src/pet.rs) モジュールに住んでおり、**依存を一切増やさない**：

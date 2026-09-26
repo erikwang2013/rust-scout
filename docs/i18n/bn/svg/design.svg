@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">ড্রাইভার অ্যাবস্ট্রাকশন — Engine trait-ই একমাত্র সন্ধিস্থল</text>
-  <text x="118" y="246" class="desc">৮টি আবশ্যক + ৫টি ডিফল্টসহ (মোট ১৩), async EngineFuture থেকে ফেরে। আট ব্যাকএন্ড, এক চুক্তি — ব্যাকএন্ড বদল = কনফিগ বদল।</text>
+  <text x="118" y="246" class="desc">৬টি আবশ্যক + ৮টি ডিফল্টসহ (মোট ১৪), async EngineFuture থেকে ফেরে। আট ব্যাকএন্ড, এক চুক্তি — ব্যাকএন্ড বদল = কনফিগ বদল।</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // বা collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">সরলতা আগে — ডিফল্টে শূন্য নির্ভরতা</text>
-  <text x="118" y="454" class="desc">ডিফল্ট ইন-মেমোরি ড্রাইভার সঙ্গে সঙ্গে চলে, কোর শুধু serde / thiserror-এ নির্ভর। আট ব্যাকএন্ড নিজস্ব feature-এ আবদ্ধ — যা লাগে না তা কম্পাইল হয় না।</text>
+  <text x="118" y="454" class="desc">ডিফল্ট ইন-মেমোরি ড্রাইভার সঙ্গে সঙ্গে চলে, কোর শুধু serde / serde_json / thiserror-এ নির্ভর। আট ব্যাকএন্ড নিজস্ব feature-এ আবদ্ধ — যা লাগে না তা কম্পাইল হয় না।</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">নিরাপত্তার সীমা — ইনপুট যাচাই + আউটপুট এস্কেপ</text>
-  <text x="118" y="558" class="desc">ইনডেক্স নাম আগে validate_index_name দিয়ে যাচাই হয় (ফাঁকা / স্ল্যাশ / শুরুতে বিন্দু বাতিল); তারপর সব HTTP ইঞ্জিনের index ও id RFC 3986 মেনে শতাংশ-এনকোড হয়।</text>
+  <text x="118" y="558" class="desc">ইনডেক্স নাম আগে validate_index_name দিয়ে যাচাই হয় (ফাঁকা / স্ল্যাশ / শুরুতে বিন্দু, * ? , + ও শুরুতে -/_ বাতিল); তারপর সব HTTP ইঞ্জিনের index ও id RFC 3986 মেনে শতাংশ-এনকোড হয়।</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

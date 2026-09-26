@@ -241,6 +241,11 @@ impl Engine for AlgoliaEngine {
     }
 
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
+        // 索引名校验先于短路，理由同 meilisearch
+        let index = builder.index.as_deref().unwrap_or("default");
+        if let Err(e) = crate::validate_index_name(index) {
+            return Box::pin(async move { Err(e) });
+        }
         // 空 where_in 集合 = 不匹配任何（Collection 语义）：短路空结果。
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
@@ -252,8 +257,6 @@ impl Engine for AlgoliaEngine {
         let limit = builder.take.unwrap_or(10);
         let want_none = builder.take == Some(0);
         Box::pin(async move {
-            let index = builder.index.as_deref().unwrap_or("default");
-            crate::validate_index_name(index)?;
             let body = Self::search_body(builder, offset, limit.max(1));
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
@@ -567,4 +570,27 @@ mod tests {
             .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
         assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
     }
+
+    #[test]
+    fn empty_where_in_and_not_in_produce_no_filter_clause() {
+        // 空 IN 集合 = 不匹配任何（由 search/paginate 短路，不进 filter）；
+        // 空 NOT IN 集合 = 无过滤。两者都不该出现在 filters 里。
+        let b = SearchBuilder::new("q")
+            .where_in("tag", Vec::<&str>::new())
+            .where_not_in("cat", Vec::<&str>::new());
+        let f = AlgoliaEngine::build_filters(&b).unwrap_or_default();
+        assert!(!f.contains("tag:") && !f.contains("cat:"), "got {f:?}");
+    }
+
+
+    #[tokio::test]
+    async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
+        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
+        let err = engine
+            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
 }

@@ -8,9 +8,9 @@
 
 **rust-scout — تجريد مكتبة بحث نصي كامل** — طبقة واجهة خفيفة للبحث النصي الكامل في Rust. مستوحاة من أسلوب الاستعلامات المتسلسلة في [Laravel Scout](https://laravel.com/docs/scout)، وهي تجرّد **8 خلفيات** (الذاكرة، Elasticsearch/OpenSearch، Meilisearch، Typesense، Algolia، SQLite، XunSearch، Null) عبر trait موحّد واحد هو `Engine`: **محرك ذاكرة بلا أي اعتماديات للتطوير، وانتقال سلس إلى أي خلفية في الإنتاج دون تغيير سطر واحد من كود العمل.**
 
-![حيوان المشروع الأليف: كلب البحث Scout](svg/pet.svg)
+![حيوان المشروع الأليف: روبوت البحث Scout](svg/pet.svg)
 
-> حيوان المشروع الأليف **كلب البحث Scout** — يشمّ المستندات، ويتتبّع الفهارس.
+> حيوان المشروع الأليف **روبوت البحث Scout** — ثماني فتحات وحدات على الصدر، وصّل أيًّا منها.
 > وهو ليس في التوثيق وحده: إنه حاضر أيضًا في شعار الطرفية وتلميحات الأخطاء،
 > انظر [حيوان المشروع الأليف](#حيوان-المشروع-الأليف).
 
@@ -39,7 +39,7 @@ let result = engine.search(
 | 📦 عمليات مجمّعة | `update_bulk` / `delete_bulk` تقلّلان الرحلات ذهابًا وإيابًا؛ و`delete_in` يستهدف فهرسًا واحدًا بدقة |
 | 🔌 محركات قابلة للتبديل | الافتراضي بلا اعتماديات؛ و8 خلفيات كل واحدة خلف ميزة خاصة بها، فما لا تستخدمه لا يُصرَّف |
 | 🔒 حدود الأمان | التحقق من اسم الفهرس (`validate_index_name`) + ترميز النسبة المئوية وفق RFC 3986 لمنع حقن المسارات |
-| 🐕 حيوان المشروع الأليف | كلب البحث Scout: شعار الطرفية + تلميح تشخيصي لكل خطأ (`rust_scout::pet`) |
+| 🤖 حيوان المشروع الأليف | روبوت البحث Scout: شعار الطرفية + تلميح تشخيصي لكل خطأ (`rust_scout::pet`) |
 
 ## تصميم البنية
 
@@ -74,29 +74,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # جذر crate: تصدير الوحدات + إعادة تصدير الأنواع العامة حسب feature
 │   │
-│   ├── engine.rs           # trait Engine: عقد المحرك الوحيد (8 إلزامية + 5 افتراضية)
+│   ├── engine.rs           # trait Engine: عقد المحرك الوحيد (6 إلزامية + 8 افتراضية)
 │   ├── manager.rs          # EngineManager: الواجهة، يوزّع حسب driver ويخزّن Arc<dyn Engine>
-│   ├── config.rs           # ScoutConfig (8 بوانٍ) + validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig (9 بوانٍ) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: الاستعلامات المتسلسلة
 │   ├── document.rs         # SearchDocument: المستند المكتوب (عقد serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: نتائج الاستعلام
 │   ├── searchable.rs       # Searchable / SearchableStore: جسر نماذج العمل
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # حيوان المشروع الأليف: كلب البحث Scout (الشعار + تلميحات الأخطاء)
+│   ├── pet.rs              # حيوان المشروع الأليف: روبوت البحث Scout (الشعار + تلميحات الأخطاء)
 │   │
 │   ├── collection_engine.rs    # محرك الذاكرة (الافتراضي، بلا اعتماديات)
 │   ├── null_engine.rs          # محرك لا يفعل شيئًا: يُسقط الكتابات، ونتائج فارغة دائمًا  [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                        [elasticsearch]
-│   │   └── query.rs            #   بناء query_string وتحليل الاستجابة
+│   ├── query.rs                #   بناء query_string وتحليل الاستجابة
 │   ├── meilisearch_engine.rs   # Meilisearch (REST)                            [meilisearch]
 │   ├── typesense_engine.rs     # Typesense (REST)                              [typesense]
-│   │   └── typesense_query.rs  #   معاملات البحث وبناء filter_by
+│   ├── typesense_query.rs      #   معاملات البحث وبناء filter_by
 │   ├── algolia_engine.rs       # Algolia (REST سحابي مُدار)                    [algolia]
 │   ├── database_engine.rs      # SQLite (sqlx، تصفية LIKE الأولية + تدقيق في الذاكرة) [database]
 │   ├── xunsearch_engine.rs     # XunSearch: بروتوكول xunsearchd الأصلي عبر TCP  [xunsearch]
-│   │   ├── xunsearch_query.rs  #   ترميز الحزم وفكّها + مخطط حقول ini
-│   │   └── xunsearch_tests.rs  #   اختبارات شاملة من الطرف إلى الطرف مع خادم وهمي
+│   ├── xunsearch_query.rs      #   ترميز الحزم وفكّها + مخطط حقول ini
+│   ├── xunsearch_tests.rs      #   اختبارات شاملة من الطرف إلى الطرف مع خادم وهمي
 │   │
 │   └── (اختبارات الوحدة مُضمَّنة أسفل كل وحدة تحت #[cfg(test)] mod tests)
 ├── tests/                  # اختبارات التكامل (فارغة حاليًا، الاختبارات مُضمَّنة في src)
@@ -124,6 +124,7 @@ rust-scout/
 | XunSearch | الخادم يدعم حقل ترتيب واحدًا فقط | استخدام عدة `order_by` يعيد `Unsupported` |
 | XunSearch | الحذف الناعم غير مُنفَّذ | `soft_delete` / `only_trashed` يعيدان `Unsupported` |
 | XunSearch | إنشاء فهرس يحتاج ملف ini لمخطط الحقول | `create_index` يعيد `Unsupported` (مرّر ملف ini إلى `XunSearchEngine::new`) |
+| العدد الافتراضي للنتائج | بدون تمرير `take` يعيد collection / database **كل** النتائج المطابقة | باقي المحركات الستة تعيد **10** افتراضيًا (الحد المعتاد في خلفياتها) |
 
 مواءمتان دلاليتان مقصودتان:
 
@@ -139,7 +140,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # للمثال فقط
 ```
 
@@ -241,9 +242,9 @@ engine.delete_index("books").await?;                           // حذف الف�
 > (`collection` / `database`)؛ أما خلفيات HTTP فلا تستطيع ذلك وتعيد `ScoutError::Unsupported`
 > (بدلًا من ألّا تفعل شيئًا بصمت).
 >
-> عقد `flush` هو تحديث ظهور الكتابات — **ولا يقوم أي محرك بإفراغ الفهرس**: ES ينفّذ
-> `_refresh`، وبقية المحركات تكون كتاباتها ظاهرة فورًا، لذا هو no-op. لإفراغ فهرس
-> استخدم `delete_index`.
+> عقد `flush` هو تحديث ظهور الكتابات — **ولا يقوم أي محرك بإفراغ الفهرس**: ES يرسل
+> `_refresh`، وXunSearch يرسل `CMD_INDEX_COMMIT`، وبقية المحركات تكون كتاباتها ظاهرة فورًا،
+> لذا هو no-op. لإفراغ فهرس استخدم `delete_index`.
 
 ### التبديل إلى Elasticsearch / OpenSearch
 
@@ -304,9 +305,10 @@ let engine = EngineManager::new(config).engine()?;
 
 أما بواني إعدادات بقية المحركات فهي موثّقة على [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)` و`ScoutConfig::algolia(app_id, api_key)` و`ScoutConfig::database(url, fields)` و`ScoutConfig::null()` و`ScoutConfig::xunsearch(host, project)`.
 
-> في محرك SQLite (`database`) يكون `total` عدًّا على مستوى SQL (الفهرس + تصفية LIKE الأولية)؛
-> وقد تجعل شروط wheres / الحذف الناعم القيمة `hits.len() < total` بعد التصفية في الذاكرة،
-> والترقيم يعتمد على hits.
+> في محرك SQLite (`database`) يكون `total` **عدد الإصابات بعد التصفية**، تمامًا كما في
+> `CollectionEngine`: لا ينفّذ SQL إلا الفهرس + تمريرة LIKE الخشنة لجلب المرشّحين، ثم تجري
+> شروط wheres / الحذف الناعم / الترتيب / الترقيم كلها في الذاكرة. ولا يمكن دفع الترقيم إلى
+> `LIMIT/OFFSET` في SQL — فذلك يجعل الصفوف المطابقة خارج النافذة غير قابلة للوصول إلى الأبد.
 
 ### الحقول المحجوزة
 
@@ -351,9 +353,10 @@ impl Searchable for Article {
 
 ## حيوان المشروع الأليف
 
-![حيوان المشروع الأليف: كلب البحث Scout](svg/pet.svg)
+![حيوان المشروع الأليف: روبوت البحث Scout](svg/pet.svg)
 
-**Scout · كلب البحث** — يشمّ المستندات، ويتتبّع الفهارس. حيثما وُجد استعلام كان حاضرًا.
+**Scout · روبوت البحث** — ثماني فتحات وحدات على الصدر، وصّل أيًّا منها: في التطوير مشغّل الذاكرة
+بلا اعتماديات، وفي الإنتاج أي خلفية شئت، دون تغيير سطر واحد من كود العمل.
 الصورة في [`svg/pet.svg`](svg/pet.svg)، وهكذا يبدو في الطرفية:
 
 ```console
@@ -362,27 +365,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 يسكن هذا الحيوان وحدة [`rust_scout::pet`](../../../src/pet.rs) و**لا يضيف أي اعتماديات**:

@@ -14,9 +14,9 @@ Typesense, Algolia, SQLite, XunSearch, Null): **драйвер в памяти �
 для разработки, бесшовное переключение на любой бэкенд в продакшене, без изменения
 ни одной строки бизнес-кода.**
 
-![Питомец проекта: ищейка Scout](svg/pet.svg)
+![Питомец проекта: робот-поисковик Scout](svg/pet.svg)
 
-> Питомец проекта **ищейка Scout** (Search Hound) — вынюхивает документы, отслеживает индексы.
+> Питомец проекта **робот-поисковик Scout** — восемь слотов-модулей на груди, вставляй любой.
 > Он не только в документации: он есть в баннере терминала и в подсказках к ошибкам,
 > см. [Питомец проекта](#питомец-проекта).
 
@@ -45,7 +45,7 @@ let result = engine.search(
 | 📦 Пакетные операции | `update_bulk` / `delete_bulk` сокращают число обращений; `delete_in` удаляет точно в указанном индексе |
 | 🔌 Сменные драйверы | По умолчанию память без зависимостей; 8 бэкендов за своими feature — неиспользуемое не компилируется |
 | 🔒 Границы безопасности | Проверка имени индекса (`validate_index_name`) + процентное кодирование RFC 3986 против инъекций в путь |
-| 🐕 Питомец проекта | Ищейка Scout: баннер в терминале + подсказки по каждой ошибке (`rust_scout::pet`) |
+| 🤖 Питомец проекта | Робот-поисковик Scout: баннер в терминале + подсказки по каждой ошибке (`rust_scout::pet`) |
 
 ## Архитектура
 
@@ -82,29 +82,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # корень crate: экспорт модулей + реэкспорт публичных типов под feature
 │   │
-│   ├── engine.rs           # trait Engine: единственный контракт драйвера (8 обязательных + 5 по умолчанию)
+│   ├── engine.rs           # trait Engine: единственный контракт драйвера (6 обязательных + 8 по умолчанию)
 │   ├── manager.rs          # EngineManager: фасад, диспетчеризация по driver и кэш Arc<dyn Engine>
-│   ├── config.rs           # ScoutConfig (8 конструкторов) + validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig (9 конструкторов) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: цепочки запросов
 │   ├── document.rs         # SearchDocument: записываемый документ (контракт serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: результаты запроса
 │   ├── searchable.rs       # Searchable / SearchableStore: мост к бизнес-моделям
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # питомец проекта: ищейка Scout (баннер + подсказки к ошибкам)
+│   ├── pet.rs              # питомец проекта: робот-поисковик Scout (баннер + подсказки к ошибкам)
 │   │
 │   ├── collection_engine.rs    # драйвер в памяти (по умолчанию, без зависимостей)
 │   ├── null_engine.rs          # пустой драйвер: отбрасывает запись, всегда пусто   [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                            [elasticsearch]
-│   │   └── query.rs            #   построение query_string и разбор ответа
+│   ├── query.rs                #   построение query_string и разбор ответа
 │   ├── meilisearch_engine.rs   # Meilisearch (REST)                                [meilisearch]
 │   ├── typesense_engine.rs     # Typesense (REST)                                  [typesense]
-│   │   └── typesense_query.rs  #   параметры поиска и построение filter_by
+│   ├── typesense_query.rs      #   параметры поиска и построение filter_by
 │   ├── algolia_engine.rs       # Algolia (облачный REST)                           [algolia]
 │   ├── database_engine.rs      # SQLite (sqlx, грубый отбор LIKE + точный в памяти) [database]
 │   ├── xunsearch_engine.rs     # XunSearch: родной TCP-протокол xunsearchd         [xunsearch]
-│   │   ├── xunsearch_query.rs  #   кодек пакетов + схема полей ini
-│   │   └── xunsearch_tests.rs  #   сквозные тесты с mock-сервером
+│   ├── xunsearch_query.rs      #   кодек пакетов + схема полей ini
+│   ├── xunsearch_tests.rs      #   сквозные тесты с mock-сервером
 │   │
 │   └── (модульные тесты встроены в конец каждого модуля: #[cfg(test)] mod tests)
 ├── tests/                  # интеграционные тесты (пока пусто, тесты внутри src)
@@ -132,6 +132,7 @@ rust-scout/
 | XunSearch | Сервер поддерживает только одно поле сортировки | несколько `order_by` возвращают `Unsupported` |
 | XunSearch | Мягкое удаление не реализовано | `soft_delete` / `only_trashed` возвращают `Unsupported` |
 | XunSearch | Для создания индекса нужен ini со схемой полей | `create_index` возвращает `Unsupported` (передайте ini в `XunSearchEngine::new`) |
+| Размер по умолчанию | Без `take` collection / database возвращают **все** совпадения | Остальные шесть драйверов по умолчанию возвращают **10** (привычный предел их бэкендов) |
 
 Есть два намеренных семантических соответствия:
 
@@ -148,7 +149,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # только для примера
 ```
 
@@ -251,8 +252,8 @@ engine.delete_index("books").await?;                           // удалить
 > `ScoutError::Unsupported` (а не молча ничего не делают).
 >
 > Контракт `flush` — «обновить видимость записей», **ни один драйвер не очищает индекс**:
-> ES выполняет `_refresh`, остальные драйверы делают записи видимыми сразу, поэтому это
-> no-op. Чтобы очистить индекс, используйте `delete_index`.
+> ES выполняет `_refresh`, XunSearch отправляет `CMD_INDEX_COMMIT`, остальные драйверы делают
+> записи видимыми сразу, поэтому это no-op. Чтобы очистить индекс, используйте `delete_index`.
 
 ### Переключение на Elasticsearch / OpenSearch
 
@@ -313,9 +314,10 @@ let engine = EngineManager::new(config).engine()?;
 
 Конструкторы конфигурации остальных движков описаны на [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> В движке SQLite (`database`) `total` считается на уровне SQL (индекс + грубый отбор LIKE);
-> после фильтрации wheres / мягких удалений в памяти возможно `hits.len() < total`,
-> а пагинация опирается на hits.
+> В движке SQLite (`database`) `total` — это число попаданий **после фильтрации** (как в
+> `CollectionEngine`): SQL лишь выполняет индекс + грубый отбор LIKE, чтобы взять кандидатов,
+> а wheres / мягкие удаления / сортировка / пагинация происходят в памяти. Пагинацию нельзя
+> спустить в SQL `LIMIT/OFFSET` — иначе совпадающие строки за пределами окна станут недостижимы.
 
 ### Зарезервированные поля
 
@@ -362,9 +364,10 @@ impl Searchable for Article {
 
 ## Питомец проекта
 
-![Питомец проекта: ищейка Scout](svg/pet.svg)
+![Питомец проекта: робот-поисковик Scout](svg/pet.svg)
 
-**Scout · ищейка** (Search Hound) — вынюхивает документы, отслеживает индексы: где запрос, там и он.
+**Scout · робот-поисковик** — восемь слотов-модулей на груди, вставляй любой: разработка на
+драйвере памяти без зависимостей, продакшен — любой бэкенд, код не меняется.
 Графическая версия — в [`svg/pet.svg`](svg/pet.svg); в терминале он выглядит так:
 
 ```console
@@ -373,27 +376,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 Питомец живёт в модуле [`rust_scout::pet`](../../../src/pet.rs) и **не приносит зависимостей**:

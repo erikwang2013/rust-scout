@@ -44,9 +44,10 @@
   <rect x="358" y="100" width="145" height="132" rx="10" class="node node-alt"/>
   <text x="430" y="124" text-anchor="middle" class="step">③ Flush</text>
   <text x="430" y="148" text-anchor="middle" class="name">flush</text>
-  <text x="430" y="172" text-anchor="middle" class="desc">no-op：collection/SQLite</text>
-  <text x="430" y="188" text-anchor="middle" class="desc">no-op：Meili/TS/Algolia</text>
-  <text x="430" y="204" text-anchor="middle" class="desc">_refresh：ES</text>
+  <text x="430" y="172" text-anchor="middle" class="desc">no-op: collection/SQLite</text>
+  <text x="430" y="188" text-anchor="middle" class="desc">no-op: Meili/TS/Algolia</text>
+  <text x="430" y="204" text-anchor="middle" class="desc">_refresh: ES</text>
+  <text x="430" y="220" text-anchor="middle" class="desc">CMD_INDEX_COMMIT: XunSearch</text>
   <line x1="503" y1="166" x2="518" y2="166" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow2)"/>
 
   <rect x="518" y="100" width="145" height="132" rx="10" class="node"/>
@@ -130,7 +131,7 @@
   <text x="74" y="467" class="rowlb">Paging-Default</text>
   <text x="207" y="467" class="cell">alle Zeilen, nach id</text>
   <text x="425" y="467" class="cell">size 10, sortiert nach _score</text>
-  <text x="643" y="467" class="cell">hits entscheiden</text>
+  <text x="643" y="467" class="cell">alle Zeilen, nach id</text>
   <text x="861" y="467" class="cell">keins</text>
 
   <!-- Zeile 6 delete-Semantik -->
@@ -145,11 +146,12 @@
   <rect x="60" y="508" width="1007" height="30" rx="4" fill="#ffffff"/>
   <text x="74" y="527" class="rowlb">soft_delete</text>
   <text x="207" y="527" class="cell">ja (setzt Flag)</text>
-  <text x="425" y="527" class="cell">ja (setzt Flag)</text>
+  <text x="425" y="527" class="cell">ja (soft_delete_in)</text>
   <text x="643" y="527" class="cell">ja (3-Zustands-Filter)</text>
   <text x="861" y="527" class="cell">nein</text>
 
   <!-- ==================== Fehlerpfad ==================== -->
+  <text x="60" y="554" class="desc">XunSearch gehört nicht zu den vier Familien: sein flush ist CMD_INDEX_COMMIT (Commit auf Platte), kein no-op.</text>
   <rect x="60" y="562" width="1007" height="58" rx="8" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
   <text x="74" y="584" class="lbl">Fehlerpfad — alle laufen in crate::Result&lt;T&gt; zusammen</text>
   <text x="74" y="606" class="cell mono">InvalidIndexName · InvalidResult · Unsupported · Json · Http · Sqlx · Backend · XunSearch · XunSearchIo</text>

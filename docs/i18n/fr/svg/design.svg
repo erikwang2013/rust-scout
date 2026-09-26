@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">Abstraction des pilotes — le trait Engine est la seule couture</text>
-  <text x="118" y="246" class="desc">8 méthodes requises + 5 par défaut (13 au total), asynchrones via EngineFuture. Huit backends, un contrat — changer de backend = changer la config.</text>
+  <text x="118" y="246" class="desc">6 méthodes requises + 8 par défaut (14 au total), asynchrones via EngineFuture. Huit backends, un contrat — changer de backend = changer la config.</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // ou collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">Simplicité d'abord — zéro dépendance par défaut</text>
-  <text x="118" y="454" class="desc">Pilote mémoire par défaut, le cœur ne dépend que de serde / thiserror. Chaque backend est derrière sa feature — l'inutilisé ne se compile pas.</text>
+  <text x="118" y="454" class="desc">Pilote mémoire par défaut, le cœur ne dépend que de serde / serde_json / thiserror. Chaque backend est derrière sa feature — l'inutilisé ne se compile pas.</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">Limite de sécurité — validation d'entrée + échappement de sortie</text>
-  <text x="118" y="558" class="desc">Les noms d'index passent validate_index_name (refuse espaces, slashs, points initiaux) ; les pilotes HTTP encodent ensuite index et id en pourcent RFC 3986.</text>
+  <text x="118" y="558" class="desc">Les noms d'index passent validate_index_name (refuse espaces, slashs, points initiaux, jokers * ? , +, - / _ en tête) ; les pilotes HTTP percent-encodent ensuite index et id (RFC 3986).</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

@@ -122,7 +122,16 @@ impl XunSearchEngine {
         if builder.trashed == crate::TrashedFilter::OnlyTrashed {
             return Err(crate::ScoutError::Unsupported("xunsearch: only_trashed requires soft_delete, which this engine does not implement".to_string()));
         }
-        if !builder.where_ins.is_empty() || !builder.where_not_ins.is_empty() {
+        // 空集合走基准语义，不能和「本引擎不支持 where_in」混为一谈：
+        // 空的 IN 集合 = 不匹配任何（短路空结果）；空的 NOT IN = 无过滤（等同没有该条件）。
+        // 只有**有值**的 where_in/where_not_in 才报 Unsupported —— 否则
+        // `where_in("tag", [])` 在别的驱动返回 Ok(空)，在这里却报错。
+        if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
+            return Ok(SearchResult::default());
+        }
+        let unsupported = !builder.where_ins.is_empty()
+            || builder.where_not_ins.iter().any(|(_, v)| !v.is_empty());
+        if unsupported {
             return Err(crate::ScoutError::Unsupported("xunsearch: where_in/where_not_in not supported; use where_field (QUERY_RANGE)".to_string()));
         }
         let mut stream = self.connect(true).await?;
@@ -348,11 +357,16 @@ impl Engine for XunSearchEngine {
     }
 
 
-    fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
-        // COMMIT 保证 SUBMIT 数据落盘；504 BUSY / 406 RUNNING 视为成功（已入队）。
+    /// COMMIT 保证 SUBMIT 数据落盘；504 BUSY / 406 RUNNING 视为成功（已入队）。
+    ///
+    /// 与其它驱动一样先校验索引名，并把索引作为 db 传给 CMD_USE —— `update` 是按
+    /// 索引 SET_DB 写入的，提交默认库不会让命名索引的写入落盘（此前 `_index` 被直接
+    /// 忽略，`flush("_all")` 还会静默成功）。
+    fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
+            crate::validate_index_name(index)?;
             let mut stream = self.connect(false).await?;
-            self.use_project(&mut stream, None).await?;
+            self.use_project(&mut stream, Some(index)).await?;
             with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_COMMIT, 0, 0, &[], &[]))).await?;
             match read_packet(&mut stream).await? {
                 (CMD_OK, OK_DB_COMMITED, _, _) => Ok(()),
@@ -521,4 +535,45 @@ mod tests {
         assert_eq!(result.hits[0].source, serde_json::json!({"body": "hello world"}));
         server.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn empty_where_in_matches_nothing_instead_of_erroring() {
+        // 回归：守卫原先数「子句」而不是「值」，于是空集合被当成「本引擎不支持
+        // where_in」报 Unsupported，而基准语义是「空 IN = 不匹配任何」→ Ok(空)。
+        // 指向不可达地址：真去连就会失败，返回 Ok 说明在连接之前就短路了。
+        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
+        let r = engine
+            .search(&SearchBuilder::new("q").where_in("tag", Vec::<&str>::new()))
+            .await
+            .unwrap();
+        assert!(r.hits.is_empty() && r.total == 0);
+    }
+
+    #[tokio::test]
+    async fn empty_where_not_in_is_not_an_unsupported_error() {
+        // 空 NOT IN = 无过滤，不该报「不支持 where_in/where_not_in」。
+        // 这里只断言「不是 Unsupported」——真发查询会连不上，那是 Http/IO 类错误。
+        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
+        let err = engine
+            .search(&SearchBuilder::new("q").where_not_in("tag", Vec::<&str>::new()))
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(err, crate::ScoutError::Unsupported(_)),
+            "空 NOT IN 不该报 Unsupported，得到 {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn flush_validates_the_index_name_before_connecting() {
+        // 回归：flush 原先忽略 _index（既不过滤也不校验），flush("_all") 会静默成功。
+        // 其余驱动都会先过 validate_index_name，这里必须一致。
+        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
+        let err = engine.flush("_all").await.unwrap_err();
+        assert!(
+            matches!(err, crate::ScoutError::InvalidIndexName(_)),
+            "_all 必须在连接之前被拒，得到 {err:?}"
+        );
+    }
+
 }

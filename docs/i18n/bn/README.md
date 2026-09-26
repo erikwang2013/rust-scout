@@ -8,9 +8,9 @@
 
 **rust-scout — পূর্ণ-পাঠ্য অনুসন্ধান লাইব্রেরির অ্যাবস্ট্রাকশন** —— Rust-এর জন্য একটি হালকা পূর্ণ-পাঠ্য অনুসন্ধান ইন্টারফেস স্তর। [Laravel Scout](https://laravel.com/docs/scout)-এর চেইন-ভিত্তিক কোয়েরি ধাঁচ থেকে অনুপ্রাণিত, যা একটি অভিন্ন `Engine` trait-এর মাধ্যমে **৮টি ব্যাকএন্ড** (ইন-মেমোরি, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite, XunSearch, Null) অ্যাবস্ট্র্যাক্ট করে: **ডেভেলপমেন্টের জন্য শূন্য-নির্ভরতা ইন-মেমোরি ড্রাইভার, প্রোডাকশনে ব্যবসায়িক কোডের এক লাইনও না বদলে যেকোনো ব্যাকএন্ডে নির্বিঘ্নে সুইচ।**
 
-![প্রজেক্টের পোষা প্রাণী: শিকারী কুকুর Scout](svg/pet.svg)
+![প্রজেক্টের পোষা প্রাণী: সার্চ রোবট Scout](svg/pet.svg)
 
-> প্রজেক্টের পোষা প্রাণী **শিকারী কুকুর Scout** (Search Hound) —— ডকুমেন্ট শুঁকে বের করে, ইনডেক্সের পথ অনুসরণ করে।
+> প্রজেক্টের পোষা প্রাণী **সার্চ রোবট Scout** —— বুকে আটটি মডিউল স্লট, যা লাগাবেন তাই।
 > শুধু ডকুমেন্টেশনে নয়: টার্মিনাল ব্যানার ও ত্রুটি-সংকেতে সে উপস্থিত,
 > দেখুন [প্রজেক্টের পোষা প্রাণী](#প্রজেক্টের-পোষা-প্রাণী)।
 
@@ -39,7 +39,7 @@ let result = engine.search(
 | 📦 বাল্ক অপারেশন | `update_bulk` / `delete_bulk` রাউন্ড-ট্রিপ কমায়; `delete_in` নির্দিষ্ট ইনডেক্সে নিখুঁতভাবে মোছে |
 | 🔌 প্লাগেবল ড্রাইভার | ডিফল্ট ইন-মেমোরি, শূন্য নির্ভরতা; ৮টি ব্যাকএন্ডের প্রতিটি আলাদা feature-এ আবদ্ধ, যা ব্যবহার করবেন না তা কম্পাইল হয় না |
 | 🔒 নিরাপত্তার সীমা | ইনডেক্স-নাম যাচাই (`validate_index_name`) + RFC 3986 শতাংশ-এনকোডিং, পাথ ইনজেকশন প্রতিরোধ |
-| 🐕 প্রজেক্টের পোষা প্রাণী | শিকারী কুকুর Scout: টার্মিনাল ব্যানার + প্রতিটি ত্রুটির জন্য নিদান সংকেত (`rust_scout::pet`) |
+| 🤖 প্রজেক্টের পোষা প্রাণী | সার্চ রোবট Scout: টার্মিনাল ব্যানার + প্রতিটি ত্রুটির জন্য নিদান সংকেত (`rust_scout::pet`) |
 
 ## আর্কিটেকচার ডিজাইন
 
@@ -76,27 +76,27 @@ rust-scout/
 │   │
 │   ├── engine.rs           # Engine trait: একমাত্র ড্রাইভার চুক্তি (৮টি আবশ্যক + ৫টি ডিফল্ট)
 │   ├── manager.rs          # EngineManager: ফ্যাসাড, driver অনুযায়ী বিতরণ ও Arc<dyn Engine> ক্যাশ
-│   ├── config.rs           # ScoutConfig (৮টি কনস্ট্রাক্টর) + validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig (৯টি কনস্ট্রাক্টর) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: চেইন-ভিত্তিক কোয়েরি
 │   ├── document.rs         # SearchDocument: লেখার ডকুমেন্ট (serde JSON চুক্তি)
 │   ├── result.rs           # SearchResult / SearchHit: কোয়েরির ফলাফল
 │   ├── searchable.rs       # Searchable / SearchableStore: ব্যবসায়িক মডেল সেতু
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # প্রজেক্টের পোষা প্রাণী: শিকারী কুকুর Scout (ব্যানার + ত্রুটি সংকেত)
+│   ├── pet.rs              # প্রজেক্টের পোষা প্রাণী: সার্চ রোবট Scout (ব্যানার + ত্রুটি সংকেত)
 │   │
 │   ├── collection_engine.rs    # ইন-মেমোরি ড্রাইভার (ডিফল্ট, শূন্য নির্ভরতা)
 │   ├── null_engine.rs          # নাল ড্রাইভার: লেখা ফেলে দেয়, ফলাফল সর্বদা খালি      [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                          [elasticsearch]
-│   │   └── query.rs            #   query_string নির্মাণ ও প্রতিক্রিয়া পার্সিং
+│   ├── query.rs                #   query_string নির্মাণ ও প্রতিক্রিয়া পার্সিং
 │   ├── meilisearch_engine.rs   # Meilisearch (REST)                              [meilisearch]
 │   ├── typesense_engine.rs     # Typesense (REST)                                [typesense]
-│   │   └── typesense_query.rs  #   অনুসন্ধান প্যারামিটার ও filter_by নির্মাণ
+│   ├── typesense_query.rs      #   অনুসন্ধান প্যারামিটার ও filter_by নির্মাণ
 │   ├── algolia_engine.rs       # Algolia (ম্যানেজড ক্লাউড REST)                   [algolia]
 │   ├── database_engine.rs      # SQLite (sqlx, LIKE মোটা ফিল্টার + ইন-মেমোরি সূক্ষ্ম ফিল্টার) [database]
 │   ├── xunsearch_engine.rs     # XunSearch: xunsearchd নেটিভ TCP প্রোটোকল          [xunsearch]
-│   │   ├── xunsearch_query.rs  #   প্যাকেট এনকোড/ডিকোড + ini ক্ষেত্র স্কিমা
-│   │   └── xunsearch_tests.rs  #   mock server সহ এন্ড-টু-এন্ড টেস্ট
+│   ├── xunsearch_query.rs      #   প্যাকেট এনকোড/ডিকোড + ini ক্ষেত্র স্কিমা
+│   ├── xunsearch_tests.rs      #   mock server সহ এন্ড-টু-এন্ড টেস্ট
 │   │
 │   └── (ইউনিট টেস্ট প্রতিটি মডিউলের নিচে ইনলাইন, #[cfg(test)] mod tests)
 ├── tests/                  # ইন্টিগ্রেশন টেস্ট (বর্তমানে খালি, টেস্ট src-এ ইনলাইন)
@@ -124,6 +124,7 @@ rust-scout/
 | XunSearch | সার্ভার কেবল একটি সর্ট ফিল্ড সমর্থন করে | একাধিক `order_by` দিলে `Unsupported` ফেরত দেয় |
 | XunSearch | সফট ডিলিট বাস্তবায়িত নয় | `soft_delete` / `only_trashed` `Unsupported` ফেরত দেয় |
 | XunSearch | ইনডেক্স তৈরিতে ফিল্ড-স্কিম ini দরকার | `create_index` `Unsupported` ফেরত দেয় (`XunSearchEngine::new`-কে একটি ini দিন) |
+| ডিফল্ট ফলাফল-সংখ্যা | `take` না দিলে collection / database **সব** মিল ফেরত দেয় | বাকি ছয়টি ড্রাইভার ডিফল্টভাবে **10** ফেরত দেয় (তাদের ব্যাকএন্ডের চিরচেনা সীমা) |
 
 দুটি ইচ্ছাকৃত শব্দার্থিক মিল:
 
@@ -140,7 +141,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # শুধু উদাহরণের জন্য প্রয়োজন
 ```
 
@@ -243,8 +244,8 @@ engine.delete_index("books").await?;                           // ইনডে�
 > (নীরবে কিছু না করে থাকার বদলে)।
 >
 > `flush`-এর চুক্তি হলো লেখার দৃশ্যমানতা রিফ্রেশ করা — **কোনো ড্রাইভারই ইনডেক্স খালি করে না**:
-> ES `_refresh` করে, বাকি ড্রাইভারগুলোতে লেখা সঙ্গে সঙ্গেই দৃশ্যমান, তাই এটি no-op। ইনডেক্স
-> খালি করতে চাইলে `delete_index` ব্যবহার করুন।
+> ES `_refresh` পাঠায়, XunSearch পাঠায় `CMD_INDEX_COMMIT`, আর বাকি ড্রাইভারগুলোতে লেখা সঙ্গে
+> সঙ্গেই দৃশ্যমান, তাই এটি no-op। ইনডেক্স খালি করতে চাইলে `delete_index` ব্যবহার করুন।
 
 ### Elasticsearch / OpenSearch-এ সুইচ করা
 
@@ -305,9 +306,10 @@ let engine = EngineManager::new(config).engine()?;
 
 বাকি ইঞ্জিনের কনফিগারেশন কনস্ট্রাক্টর দেখুন [docs.rs](https://docs.rs/rust-scout)-এ: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
 
-> SQLite ইঞ্জিনের (`database`) `total` হলো SQL স্তরের গণনা (ইনডেক্স + LIKE মোটা ফিল্টার);
-> wheres / সফট ডিলিট ইন-মেমোরিতে ফিল্টার হওয়ার পরে `hits.len() < total` হতে পারে,
-> পেজিনেশন hits-কেই মানদণ্ড ধরে।
+> SQLite ইঞ্জিনের (`database`) `total` হলো **ফিল্টার-পরবর্তী** হিট-গণনা, ঠিক `CollectionEngine`-এর মতো:
+> SQL শুধু ইনডেক্স + LIKE-এর মোটা পাস চালিয়ে প্রার্থী এনে দেয়, তারপর wheres / সফট ডিলিট /
+> সর্টিং / পেজিনেশন সবই মেমোরিতে হয়। পেজিনেশনকে SQL-এর `LIMIT/OFFSET`-এ ঠেলে দেওয়া যায় না —
+> তা করলে উইন্ডোর বাইরের মিলে যাওয়া সারিগুলো চিরকাল নাগালের বাইরে থেকে যাবে।
 
 ### সংরক্ষিত ক্ষেত্র
 
@@ -353,9 +355,10 @@ impl Searchable for Article {
 
 ## প্রজেক্টের পোষা প্রাণী
 
-![প্রজেক্টের পোষা প্রাণী: শিকারী কুকুর Scout](svg/pet.svg)
+![প্রজেক্টের পোষা প্রাণী: সার্চ রোবট Scout](svg/pet.svg)
 
-**Scout · শিকারী কুকুর** (Search Hound) —— ডকুমেন্ট শুঁকে বের করে, ইনডেক্সের পথ অনুসরণ করে; কোয়েরি যেখানে, সে-ও সেখানে।
+**Scout · সার্চ রোবট** —— বুকে আটটি মডিউল স্লট, যা লাগাবেন তাই: ডেভেলপমেন্টে শূন্য-নির্ভরতার
+ইন-মেমোরি ড্রাইভার, প্রোডাকশনে যেকোনো ব্যাকএন্ড, ব্যবসায়িক কোড এক লাইনও বদলাতে হয় না।
 ছবির সংস্করণ দেখুন [`docs/svg/pet.svg`](../../svg/pet.svg)-এ; টার্মিনালে দেখতে এমন:
 
 ```console
@@ -364,27 +367,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 পোষা প্রাণীটি [`rust_scout::pet`](../../../src/pet.rs) মডিউলে থাকে, **কোনো নির্ভরতা আনে না**:

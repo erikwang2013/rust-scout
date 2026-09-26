@@ -87,8 +87,8 @@
   <text x="856" y="297" text-anchor="middle" class="ico-t">S</text>
   <text x="884" y="289" class="name">소프트 삭제</text>
   <text x="884" y="307" class="desc">예약 필드 __soft_deleted</text>
-  <text x="838" y="339" class="desc">기본은 제외; 쿼리에서</text>
-  <text x="838" y="355" class="desc">포함하거나 삭제된 것만 볼지.</text>
+  <text x="838" y="339" class="desc">soft_delete_in 이 표시를 남기고,</text>
+  <text x="838" y="355" class="desc">쿼리에서 포함하거나 삭제된 것만 볼지.</text>
   <text x="838" y="383" class="api">.with_trashed()/.only_trashed()</text>
 
   <!-- ========== 3행: 색인과 드라이버 ========== -->
@@ -116,8 +116,8 @@
   <text x="624" y="446" class="name">교체 가능한 드라이버</text>
   <text x="624" y="464" class="desc">8가지 백엔드</text>
   <text x="578" y="496" class="desc">collection · elasticsearch ·</text>
-  <text x="578" y="512" class="desc">meilisearch · typesense · algolia</text>
-  <text x="578" y="540" class="api">ScoutConfig::meilisearch(..)</text>
+  <text x="578" y="512" class="desc">meilisearch · typesense · algolia ·</text>
+  <text x="578" y="528" class="desc">database · xunsearch · null</text>
 
   <rect x="820" y="414" width="240" height="142" rx="10" class="card"/>
   <rect x="838" y="430" width="36" height="36" rx="8" class="ico"/>

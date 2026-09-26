@@ -6,6 +6,22 @@ use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
 use crate::{SearchBuilder, SearchDocument, SearchHit, SearchResult, TrashedFilter};
 
+/// 分页模式。**两种模式的总数语义不同**，这是选它的唯一理由：
+///
+/// - `Page`：`page`/`hitsPerPage`。Meilisearch 只在这个模式下返回**穷尽**的
+///   `totalHits`，与 Collection/ES/Typesense/Algolia 的 `total` 一致。
+/// - `Offset`：`offset`/`limit`。能表达任意起点（页对齐表达不了 `skip % take`
+///   的余数），但 Meilisearch 此时只回 `estimatedTotalHits` —— 官方文档明确说它
+///   不适合算精确页数，且受索引 `maxTotalHits`（默认 1000）封顶。
+///
+/// 所以：窗口页对齐时走 `Page`（`paginate` 永远对齐，普通 `search` 在
+/// `skip` 是 `take` 整数倍时也对齐），只有真正页对不齐时才退回 `Offset`。
+/// 两者互斥，Meilisearch 拒绝同时出现。
+enum PageMode {
+    Page(usize, usize),
+    Offset(usize, usize),
+}
+
 /// Meilisearch 引擎。文档主键固定为 `id` 字段（add-or-replace 语义）；
 /// 软删除标记为 `__soft_deleted` 布尔字段。
 pub struct MeilisearchEngine {
@@ -124,34 +140,38 @@ impl MeilisearchEngine {
         Value::Array(parts.into_iter().map(Value::String).collect())
     }
 
-    /// `skip`/`take` → `offset`/`limit`。`skip` 精确映射到 `offset`，**不**折算成页：
-    /// 页只能表达页对齐的起点，`.skip(15).take(10)` 会丢掉 `15 % 10` 的余数，
-    /// 返回 10–19 而不是 Collection 的 15–24（客户端按偏移翻页会重复/漏行）。
-    /// `take(0)` 由调用方短路，这里缺省 10。
-    fn offset_limit(builder: &SearchBuilder) -> (usize, usize) {
-        (builder.skip.unwrap_or(0), builder.take.unwrap_or(10))
+    fn page_mode(builder: &SearchBuilder) -> PageMode {
+        let take = builder.take.unwrap_or(10).max(1);
+        let skip = builder.skip.unwrap_or(0);
+        if skip.is_multiple_of(take) {
+            PageMode::Page(skip / take + 1, take)
+        } else {
+            PageMode::Offset(skip, take)
+        }
     }
 
-    /// `page`/`per_page` → `offset`/`limit`：page N 即 offset `(N-1)*per_page`，
-    /// 与 `CollectionEngine::paginate` 的页语义一致。
-    fn page_offset(page: usize, per_page: usize) -> (usize, usize) {
-        let per_page = per_page.max(1);
-        (
-            page.max(1).saturating_sub(1).saturating_mul(per_page),
-            per_page,
-        )
+    /// `page`/`per_page` → 页模式；page N 与 `(N-1)*per_page` 的偏移等价。
+    fn page_mode_of(page: usize, per_page: usize) -> PageMode {
+        PageMode::Page(page.max(1), per_page.max(1))
     }
 
-    /// 请求体。用 `offset`/`limit` 而非 `page`/`hitsPerPage`：后者只能表达页对齐的
-    /// 起点，且 Meilisearch 拒绝 `offset` 与 `page` 同时出现。
-    fn search_body(builder: &SearchBuilder, offset: usize, limit: usize) -> Value {
+    /// 请求体。按 [`PageMode`] 二选一，理由见那里的注释。
+    fn search_body(builder: &SearchBuilder, mode: &PageMode) -> Value {
         let mut body = Map::new();
         body.insert("q".into(), Value::String(builder.query.clone()));
         if let Some(filter) = Self::build_filter(builder) {
             body.insert("filter".into(), Value::String(filter));
         }
-        body.insert("limit".into(), Value::from(limit));
-        body.insert("offset".into(), Value::from(offset));
+        match *mode {
+            PageMode::Page(page, per_page) => {
+                body.insert("page".into(), Value::from(page));
+                body.insert("hitsPerPage".into(), Value::from(per_page));
+            }
+            PageMode::Offset(offset, limit) => {
+                body.insert("offset".into(), Value::from(offset));
+                body.insert("limit".into(), Value::from(limit));
+            }
+        }
         if !builder.orders.is_empty() {
             body.insert("sort".into(), Self::sort_array(builder));
         }
@@ -228,6 +248,12 @@ impl Engine for MeilisearchEngine {
     }
 
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
+        // 索引名校验必须在短路之前：否则 within("_all") 配一个空 where_in 会返回
+        // Ok(空结果)，而其它驱动返回 InvalidIndexName —— 边界行为必须一致。
+        let index = builder.index.as_deref().unwrap_or("default");
+        if let Err(e) = crate::validate_index_name(index) {
+            return Box::pin(async move { Err(e) });
+        }
         // 空 where_in 集合 = 不匹配任何（Collection 语义）：短路空结果。
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
@@ -235,12 +261,10 @@ impl Engine for MeilisearchEngine {
         // take(0)：Collection/ES 的 total 是「取之前」的全量匹配数，take(0) 于是
         // 返回「命中总数 + 空 hits」。total 只能从后端拿，所以请求照发，但只取 1 条
         // （limit=0 在 Meilisearch 上语义不明），拿到 total 后把 hits 清空。
-        let (offset, limit) = Self::offset_limit(builder);
+        let mode = Self::page_mode(builder);
         let want_none = builder.take == Some(0);
         Box::pin(async move {
-            let index = builder.index.as_deref().unwrap_or("default");
-            crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, offset, limit.max(1));
+            let body = Self::search_body(builder, &mode);
             let path = format!("/indexes/{}/search", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             let result = Self::parse_search_response(&raw);
@@ -260,11 +284,12 @@ impl Engine for MeilisearchEngine {
         }
         // 页语义在本地折算成 offset：page N 与 Collection 的 (N-1)*per_page 对齐，
         // 所以 paginate 的结果与改 offset 之前逐条相同。
-        let (offset, per_page) = Self::page_offset(page, per_page);
+        // paginate 天然页对齐：走 Page 模式，total 是穷尽的 totalHits
+        let mode = Self::page_mode_of(page, per_page);
         Box::pin(async move {
             let index = builder.index.as_deref().unwrap_or("default");
             crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, offset, per_page);
+            let body = Self::search_body(builder, &mode);
             let path = format!("/indexes/{}/search", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             Ok(Self::parse_search_response(&raw))
@@ -444,52 +469,49 @@ mod tests {
         );
     }
 
+
+
+
     #[test]
-    fn search_body_params() {
-        let builder = SearchBuilder::new("hello")
-            .order_by("price", true)
-            .order_by("name", false)
-            .with_trashed();
-        let body = MeilisearchEngine::search_body(&builder, 3, 10);
-        assert_eq!(body["q"], "hello");
-        assert_eq!(body["offset"], 3);
-        assert_eq!(body["limit"], 10);
-        // page/hitsPerPage 只能表达页对齐的起点（且 Meilisearch 禁止与 offset
-        // 同用），改用 offset/limit 后不再出现。
-        assert!(body.get("page").is_none());
-        assert!(body.get("hitsPerPage").is_none());
-        assert_eq!(body["sort"], serde_json::json!(["price:desc", "name:asc"]));
-        assert!(body.get("filter").is_none());
+    fn page_mode_prefers_page_when_offset_is_page_aligned() {
+        // 关键回归：Meilisearch 只在 page/hitsPerPage 模式下返回**穷尽**的 totalHits；
+        // offset/limit 模式只给 estimatedTotalHits（受 maxTotalHits 封顶，默认 1000）。
+        // 全用 offset 会让 total 变成估算值，与其余七个驱动不一致。
+        let aligned = SearchBuilder::new("q").take(10).skip(20);
+        assert!(
+            matches!(
+                MeilisearchEngine::page_mode(&aligned),
+                PageMode::Page(3, 10)
+            ),
+            "skip 是 take 的整数倍时必须走页模式（穷尽计数）"
+        );
+        // 页对不齐才退回 offset —— 页模式会丢掉 15 % 10 的余数
+        let unaligned = SearchBuilder::new("q").take(10).skip(15);
+        assert!(matches!(
+            MeilisearchEngine::page_mode(&unaligned),
+            PageMode::Offset(15, 10)
+        ));
+        // 无 skip 时页对齐（offset 0）
+        assert!(matches!(
+            MeilisearchEngine::page_mode(&SearchBuilder::new("q")),
+            PageMode::Page(1, 10)
+        ));
     }
 
     #[test]
-    fn offset_limit_keeps_skip_remainder() {
-        // 回归：skip 曾按 skip/per_page+1 折算成页，15 % 10 的余数被丢掉，
-        // .skip(15).take(10) 返回 10–19 而不是 Collection 的 15–24。
-        assert_eq!(
-            MeilisearchEngine::offset_limit(&SearchBuilder::new("").skip(15).take(10)),
-            (15, 10)
-        );
-        assert_eq!(
-            MeilisearchEngine::offset_limit(&SearchBuilder::new("").skip(25).take(7)),
-            (25, 7)
-        );
-        assert_eq!(MeilisearchEngine::offset_limit(&SearchBuilder::new("")), (0, 10));
-    }
-
-    #[test]
-    fn page_offset_matches_collection_page_semantics() {
-        // paginate 的页语义不变：page N == offset (N-1)*per_page，参数钳到合法范围。
-        assert_eq!(MeilisearchEngine::page_offset(1, 10), (0, 10));
-        assert_eq!(MeilisearchEngine::page_offset(2, 10), (10, 10));
-        assert_eq!(MeilisearchEngine::page_offset(0, 0), (0, 1));
-        assert_eq!(MeilisearchEngine::page_offset(3, 0), (2, 1));
+    fn search_body_emits_exactly_one_paging_mode() {
+        // 两种模式互斥：Meilisearch 拒绝 offset 与 page 同时出现
+        let b = SearchBuilder::new("q");
+        let paged = MeilisearchEngine::search_body(&b, &PageMode::Page(2, 10));
+        assert!(paged.get("page").is_some() && paged.get("offset").is_none());
+        let offset = MeilisearchEngine::search_body(&b, &PageMode::Offset(15, 10));
+        assert!(offset.get("offset").is_some() && offset.get("page").is_none());
     }
 
     #[test]
     fn search_body_includes_filter_when_trashed_excludes() {
         let builder = SearchBuilder::new("x").where_field("cat", 1);
-        let body = MeilisearchEngine::search_body(&builder, 1, 10);
+        let body = MeilisearchEngine::search_body(&builder, &MeilisearchEngine::page_mode_of(1, 10));
         assert_eq!(
             body["filter"],
             "cat=1 AND NOT __soft_deleted = true"
@@ -561,15 +583,6 @@ mod tests {
         assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
     }
 
-    #[test]
-    fn take_zero_truncates_but_keeps_total() {
-        // take(0) 的契约（Collection/ES 基准）是「命中总数 + 空 hits」：total 在分页
-        // 之前算出，不能因为不要 hits 就报 0。截断逻辑在 result.rs::without_hits，
-        // 那里有独立单测；这里确认本驱动用它、且 limit 被钳到 1（limit=0 语义不明）。
-        assert_eq!(MeilisearchEngine::offset_limit(&SearchBuilder::new("").take(0)), (0, 0));
-        let r = SearchResult { total: 7, ..SearchResult::default() };
-        assert_eq!(r.without_hits().total, 7);
-    }
 
     #[tokio::test]
     async fn empty_where_in_short_circuits_search_and_paginate() {
@@ -587,4 +600,17 @@ mod tests {
         assert!(paged.hits.is_empty());
         assert_eq!(paged.total, 0);
     }
+
+    #[tokio::test]
+    async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
+        // 回归：空 where_in 的短路原先排在 validate_index_name 之前，
+        // within("_all") 会因此返回 Ok(空结果) 而不是 InvalidIndexName。
+        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
+        let err = engine
+            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
 }

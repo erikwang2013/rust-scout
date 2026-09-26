@@ -1,6 +1,6 @@
 //! 项目宠物演示：`cargo run --example pet`
 //!
-//! 打印嗅探猎犬 Scout 的终端横幅，然后牵它去嗅三个**真实**的错误路径
+//! 打印检索机器人 Scout 的终端横幅，然后让它去跑三个**真实**的错误路径
 //! （索引名校验、文档字段校验、缺失 feature 的驱动），看它给出什么提示。
 
 use std::io::IsTerminal;
@@ -39,7 +39,7 @@ fn main() {
     println!("  {}", paint(DIM, pet::TAGLINE));
     println!();
 
-    println!("{}", paint(BLUE, "── 让它嗅几个真实的错误 ──"));
+    println!("{}", paint(BLUE, "── 让它跑几个真实的错误 ──"));
     println!();
 
     // 1) 索引名校验
@@ -65,11 +65,11 @@ fn main() {
     print_outcome("ScoutConfig::xunsearch(..).engine()", &driver);
 
     println!();
-    println!("  {}", paint(DIM, "嗅探结束。爪印留在 docs/svg/pet.svg。"));
+    println!("  {}", paint(DIM, "巡检结束。形象见 docs/svg/pet.svg。"));
     println!();
 }
 
-/// 跑一个真实操作，成功画 ✓、失败就把猎犬的提示一并打出来。
+/// 跑一个真实操作，成功画 ✓、失败就把机器人的提示一并打出来。
 fn sniff(label: &str, outcome: rust_scout::Result<()>) {
     let text = match outcome {
         Ok(()) => "\x1b[32m✓ 通过了 —— 这条路上没有错误的味道\x1b[0m".to_string(),

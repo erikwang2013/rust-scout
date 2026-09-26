@@ -107,11 +107,12 @@ impl TypesenseEngine {
     /// 空 where_in 集合 = 不匹配任何（Collection 语义）：放在这里短路，两个入口
     /// 都覆盖到，不会只在 search 上修好而 paginate 继续把 `field:=[]` 丢给后端。
     async fn search_page(&self, builder: &SearchBuilder, offset: usize, limit: usize) -> crate::Result<SearchResult> {
+        let index = builder.index.as_deref().unwrap_or("default");
+        // 校验先于短路：空 where_in 不该让非法索引名蒙混过关
+        crate::validate_index_name(index)?;
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Ok(SearchResult::default());
         }
-        let index = builder.index.as_deref().unwrap_or("default");
-        crate::validate_index_name(index)?;
         let params = search_params(builder, offset, limit);
         let path = format!("/collections/{}/documents/search", percent_encode(index));
         let (status, text) = self.raw(reqwest::Method::GET, &path, Some(&params), None, None).await?;
@@ -285,4 +286,15 @@ mod tests {
         assert!(paged.hits.is_empty());
         assert_eq!(paged.total, 0);
     }
+
+    #[tokio::test]
+    async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
+        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
+        let err = engine
+            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
 }

@@ -12,9 +12,9 @@
 Typesense、Algolia、SQLite、XunSearch、Null）：**开发用零依赖内存驱动，
 生产无缝切换任意后端，业务代码一行不改。**
 
-![项目宠物：嗅探猎犬 Scout](docs/svg/pet.svg)
+![项目宠物：检索机器人 Scout](docs/svg/pet.svg)
 
-> 项目宠物 **嗅探猎犬 Scout**（Search Hound）—— 嗅探文档，追踪索引。
+> 项目宠物 **检索机器人 Scout** —— 胸前八个模块插槽，插哪个用哪个。
 > 它不只在文档里：终端横幅和错误提示里都有它，见 [项目宠物](#项目宠物)。
 
 ```rust
@@ -42,7 +42,7 @@ let result = engine.search(
 | 📦 批量操作 | `update_bulk` / `delete_bulk` 减少往返；`delete_in` 精确到指定索引删除 |
 | 🔌 可插拔驱动 | 默认内存零依赖；8 种后端各自 feature 门控，按需引入不用的不编译 |
 | 🔒 安全边界 | 索引名校验（`validate_index_name`）+ RFC 3986 百分号编码，杜绝路径注入 |
-| 🐕 项目宠物 | 嗅探猎犬 Scout：终端横幅 + 逐错误的排查提示（`rust_scout::pet`） |
+| 🤖 项目宠物 | 检索机器人 Scout：终端横幅 + 逐错误的排查提示（`rust_scout::pet`） |
 
 ## 架构设计
 
@@ -77,29 +77,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # crate 根：模块导出 + feature 门控的公开类型再导出
 │   │
-│   ├── engine.rs           # Engine trait：唯一的驱动契约（8 必需 + 5 默认实现）
+│   ├── engine.rs           # Engine trait：唯一的驱动契约（6 必需 + 8 默认实现）
 │   ├── manager.rs          # EngineManager：门面，按 driver 分发并缓存 Arc<dyn Engine>
-│   ├── config.rs           # ScoutConfig（8 个构造器）+ validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig（9 个构造器，含 opensearch 别名）+ validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter：链式查询
 │   ├── document.rs         # SearchDocument：写入文档（serde JSON 契约）
 │   ├── result.rs           # SearchResult / SearchHit：查询结果
 │   ├── searchable.rs       # Searchable / SearchableStore：业务模型桥接
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # 项目宠物：嗅探猎犬 Scout（横幅 + 错误提示）
+│   ├── pet.rs              # 项目宠物：检索机器人 Scout（横幅 + 错误提示）
 │   │
 │   ├── collection_engine.rs    # 内存驱动（默认，零依赖）
 │   ├── null_engine.rs          # 空驱动：丢弃写入、永远空结果        [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch（REST）            [elasticsearch]
-│   │   └── query.rs            #   query_string 构造与响应解析
+│   ├── query.rs                #   ES 的 query_string 构造与响应解析
 │   ├── meilisearch_engine.rs   # Meilisearch（REST）                [meilisearch]
 │   ├── typesense_engine.rs     # Typesense（REST）                  [typesense]
-│   │   └── typesense_query.rs  #   搜索参数与 filter_by 构造
+│   ├── typesense_query.rs      #   Typesense 搜索参数与 filter_by 构造
 │   ├── algolia_engine.rs       # Algolia（托管云 REST）              [algolia]
 │   ├── database_engine.rs      # SQLite（sqlx，LIKE 粗筛 + 内存精筛） [database]
 │   ├── xunsearch_engine.rs     # XunSearch：xunsearchd 原生 TCP 协议  [xunsearch]
-│   │   ├── xunsearch_query.rs  #   封包编解码 + ini 字段方案
-│   │   └── xunsearch_tests.rs  #   带 mock server 的端到端测试
+│   ├── xunsearch_query.rs      #   XunSearch 封包编解码 + ini 字段方案
+│   ├── xunsearch_tests.rs      #   XunSearch 带 mock server 的端到端测试
 │   │
 │   └── (单元测试内联在各模块底部 #[cfg(test)] mod tests)
 ├── tests/                  # 集成测试（当前为空，测试内联在 src）
@@ -126,6 +126,7 @@ rust-scout/
 | XunSearch | 服务端只支持单字段排序 | 多个 `order_by` 返回 `Unsupported` |
 | XunSearch | 未实现软删除 | `soft_delete` / `only_trashed` 返回 `Unsupported` |
 | XunSearch | 建索引需要字段方案 ini | `create_index` 返回 `Unsupported`（改用 `XunSearchEngine::new` 传 ini） |
+| 默认条数 | 不传 `take` 时 collection / database 返回**全部**命中 | 其余六个驱动默认只返回 **10** 条（沿用各自后端的惯例上限） |
 
 另外两处刻意的语义对齐：
 
@@ -140,7 +141,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
 ```
 
@@ -241,7 +242,8 @@ engine.delete_index("books").await?;                           // 删索引
 > HTTP 后端做不到，会返回 `ScoutError::Unsupported`（而不是静默什么都不做）。
 >
 > `flush` 的契约是「刷新写入可见性」，**任何驱动都不会清空索引**：ES 走
-> `_refresh`，其余驱动写入即时可见，为 no-op。要清空索引请用 `delete_index`。
+> `_refresh`，XunSearch 发 `CMD_INDEX_COMMIT`，其余驱动写入即时可见、为 no-op。
+> 要清空索引请用 `delete_index`。
 
 ### 切换到 Elasticsearch / OpenSearch
 
@@ -350,9 +352,10 @@ impl Searchable for Article {
 
 ## 项目宠物
 
-![项目宠物：嗅探猎犬 Scout](docs/svg/pet.svg)
+![项目宠物：检索机器人 Scout](docs/svg/pet.svg)
 
-**Scout · 嗅探猎犬**（Search Hound）—— 嗅探文档，追踪索引，哪里有查询，哪里就有它。
+**Scout · 检索机器人**—— 胸前八个模块插槽，插哪个用哪个：开发插零依赖的内存驱动，
+上线换任意后端，业务代码一行不改。
 图形版见 [`docs/svg/pet.svg`](docs/svg/pet.svg)；终端里长这样：
 
 ```console
@@ -361,31 +364,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-        +----------------+
-        |  [] [] [] []   |
-        |  [] [] [] []   |
-        +----------------+
-           ||      ||
-           ||      ||
-          (__)    (__)
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 宠物住在 [`rust_scout::pet`](src/pet.rs) 模块里，**不引入任何依赖**：

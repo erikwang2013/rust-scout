@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">Абстракция драйверов — trait Engine, единственный шов</text>
-  <text x="118" y="246" class="desc">8 обязательных + 5 методов, async через EngineFuture. Восемь бэкендов — один контракт.</text>
+  <text x="118" y="246" class="desc">6 обязательных + 8 по умолчанию (14 всего), async через EngineFuture. Восемь бэкендов, один контракт.</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // или collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">Простота прежде всего — без зависимостей</text>
-  <text x="118" y="454" class="desc">Драйвер памяти работает сразу, ядро зависит только от serde / thiserror. Бэкенды — за своими feature.</text>
+  <text x="118" y="454" class="desc">Драйвер памяти работает сразу, ядро зависит только от serde / serde_json / thiserror. Бэкенды — за feature.</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">Границы защиты — проверка входа + экранирование</text>
-  <text x="118" y="558" class="desc">Имя индекса проходит validate_index_name (пробелы, слэши, точка), затем index и id кодируются по RFC 3986.</text>
+  <text x="118" y="558" class="desc">Имя индекса: validate_index_name (пробелы, слэши, ведущая точка, * ? , +, ведущие - / _), затем index и id — RFC 3986.</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

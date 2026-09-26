@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">Treiber-Abstraktion — Engine trait ist die einzige Naht</text>
-  <text x="118" y="246" class="desc">8 erforderliche + 5 optionale Methoden (13 gesamt), async via EngineFuture. Acht Backends, ein Vertrag — Backend-Wechsel = Konfig.</text>
+  <text x="118" y="246" class="desc">6 erforderliche + 8 optionale Methoden (14 gesamt), async via EngineFuture. Acht Backends, ein Vertrag — Backend-Wechsel = Konfig.</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // oder collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">Einfach zuerst — standardmäßig ohne Abhängigkeiten</text>
-  <text x="118" y="454" class="desc">Standard ist der RAM-Treiber, nur serde / thiserror als Deps. Jedes Backend ist feature-gesteuert — Ungenutztes kompiliert nie.</text>
+  <text x="118" y="454" class="desc">Standard ist der RAM-Treiber, nur serde / serde_json / thiserror als Deps. Jedes Backend ist feature-gesteuert — Ungenutztes kompiliert nie.</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">Sicherheitsgrenze — Eingabe prüfen + Ausgabe escapen</text>
-  <text x="118" y="558" class="desc">Indexnamen laufen durch validate_index_name (keine Blanks, Slashes, führende Punkte); HTTP-Treiber percent-encoden Index + id nach RFC 3986.</text>
+  <text x="118" y="558" class="desc">Indexnamen laufen durch validate_index_name (keine Blanks, Slashes, führenden Punkte, führend - / _, Wildcards * ? , +); HTTP-Treiber percent-encoden Index + id nach RFC 3986.</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

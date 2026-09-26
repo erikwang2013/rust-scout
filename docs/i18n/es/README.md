@@ -8,9 +8,9 @@
 
 **rust-scout, abstracción de biblioteca de búsqueda de texto completo** — una capa ligera de interfaz de búsqueda de texto completo para Rust. Tomando el modelo mental de consultas encadenadas de [Laravel Scout](https://laravel.com/docs/scout), abstrae **8 backends** (memoria, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite, XunSearch, Null) mediante un trait `Engine` unificado: **driver en memoria sin dependencias para desarrollo, cambio transparente a cualquier backend en producción, sin tocar una sola línea del código de negocio.**
 
-![Mascota del proyecto: Scout el Sabueso de Búsqueda](svg/pet.svg)
+![Mascota del proyecto: Scout el Robot de Búsqueda](svg/pet.svg)
 
-> Mascota del proyecto **Scout el Sabueso de Búsqueda** — olfatea documentos, rastrea índices.
+> Mascota del proyecto **Scout el Robot de Búsqueda** — ocho ranuras de módulos en el pecho, conecta la que quieras.
 > Vive en la documentación *y* en el código: banner de terminal y avisos de error.
 > Ver [Mascota del Proyecto](#mascota-del-proyecto).
 
@@ -39,7 +39,7 @@ let result = engine.search(
 | 📦 Operaciones en lote | `update_bulk` / `delete_bulk` reducen idas y vueltas; `delete_in` apunta a un índice exacto |
 | 🔌 Drivers intercambiables | Por defecto sin dependencias; 8 backends tras su propio feature — lo que no usas no se compila |
 | 🔒 Límite de seguridad | Validación del nombre de índice (`validate_index_name`) + codificación porcentual RFC 3986 contra inyección de rutas |
-| 🐕 Mascota del proyecto | Scout el Sabueso de Búsqueda: banner de terminal + pistas de diagnóstico por error (`rust_scout::pet`) |
+| 🤖 Mascota del proyecto | Scout el Robot de Búsqueda: banner de terminal + pistas de diagnóstico por error (`rust_scout::pet`) |
 
 ## Arquitectura
 
@@ -76,29 +76,29 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # raíz del crate: export de módulos + re-export tras feature
 │   │
-│   ├── engine.rs           # trait Engine: el único contrato de driver (8 obligatorios + 5 con default)
+│   ├── engine.rs           # trait Engine: el único contrato de driver (6 obligatorios + 8 con default)
 │   ├── manager.rs          # EngineManager: fachada, despacha por driver y cachea Arc<dyn Engine>
-│   ├── config.rs           # ScoutConfig (8 constructores) + validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig (9 constructores) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: consultas encadenadas
 │   ├── document.rs         # SearchDocument: el documento escrito (contrato serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: resultados de consulta
 │   ├── searchable.rs       # Searchable / SearchableStore: puente con modelos de negocio
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
-│   ├── pet.rs              # Mascota del proyecto: Scout el Sabueso de Búsqueda (banner + pistas)
+│   ├── pet.rs              # Mascota del proyecto: Scout el Robot de Búsqueda (banner + pistas)
 │   │
 │   ├── collection_engine.rs    # driver en memoria (por defecto, sin dependencias)
 │   ├── null_engine.rs          # driver nulo: descarta escrituras, siempre vacío   [null]
 │   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                            [elasticsearch]
-│   │   └── query.rs            #   construcción de query_string y parseo de respuestas
+│   ├── query.rs                #   construcción de query_string y parseo de respuestas
 │   ├── meilisearch_engine.rs   # Meilisearch (REST)                                [meilisearch]
 │   ├── typesense_engine.rs     # Typesense (REST)                                  [typesense]
-│   │   └── typesense_query.rs  #   parámetros de búsqueda y construcción de filter_by
+│   ├── typesense_query.rs      #   parámetros de búsqueda y construcción de filter_by
 │   ├── algolia_engine.rs       # Algolia (REST en nube gestionada)                 [algolia]
 │   ├── database_engine.rs      # SQLite (sqlx, prefiltro LIKE + refinado en memoria) [database]
 │   ├── xunsearch_engine.rs     # XunSearch: protocolo TCP nativo de xunsearchd     [xunsearch]
-│   │   ├── xunsearch_query.rs  #   códec de paquetes + esquema de campos ini
-│   │   └── xunsearch_tests.rs  #   pruebas end-to-end con servidor mock
+│   ├── xunsearch_query.rs      #   códec de paquetes + esquema de campos ini
+│   ├── xunsearch_tests.rs      #   pruebas end-to-end con servidor mock
 │   │
 │   └── (las pruebas unitarias van por módulo al final, en #[cfg(test)] mod tests)
 ├── tests/                  # pruebas de integración (hoy vacío; las pruebas viven en src)
@@ -126,6 +126,7 @@ hacer algo, **lo dice explícitamente** en vez de devolver en silencio resultado
 | XunSearch | El servidor solo admite un campo de orden | varios `order_by` devuelven `Unsupported` |
 | XunSearch | Borrado lógico no implementado | `soft_delete` / `only_trashed` devuelven `Unsupported` |
 | XunSearch | Crear un índice exige un ini de esquema de campos | `create_index` devuelve `Unsupported` (pasa un ini a `XunSearchEngine::new`) |
+| Tamaño de página por defecto | Sin `take`, collection / database devuelven **todos** los hits | los otros seis drivers devuelven **10** por defecto (límite habitual de su backend) |
 
 Dos alineaciones semánticas deliberadas:
 
@@ -142,7 +143,7 @@ Dos alineaciones semánticas deliberadas:
 
 ```toml
 [dependencies]
-rust-scout = "0.6"
+rust-scout = "0.7"
 tokio = { version = "1", features = ["macros", "rt"] }   # solo para el ejemplo
 ```
 
@@ -245,8 +246,9 @@ engine.delete_index("books").await?;                           // eliminar el í
 > pueden hacerlo y devuelven `ScoutError::Unsupported` (en vez de no hacer nada en silencio).
 >
 > El contrato de `flush` es refrescar la visibilidad de las escrituras: **ningún driver
-> vacía un índice** — ES pasa por `_refresh`, en los demás drivers las escrituras son
-> visibles de inmediato, así que es un no-op. Para vaciar un índice usa `delete_index`.
+> vacía un índice** — ES pasa por `_refresh`, XunSearch envía `CMD_INDEX_COMMIT`, y en los
+> demás drivers las escrituras son visibles de inmediato, así que es un no-op. Para vaciar
+> un índice usa `delete_index`.
 
 ### Cambiar a Elasticsearch / OpenSearch
 
@@ -307,9 +309,11 @@ let engine = EngineManager::new(config).engine()?;
 
 Los constructores de configuración de los demás motores están en [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> En el motor SQLite (`database`), `total` se cuenta en la capa SQL (índice + filtro LIKE);
-> tras el filtrado en memoria, los wheres / borrados lógicos pueden dejar `hits.len() < total`,
-> y la paginación se basa en los hits.
+> En el motor SQLite (`database`), `total` es el número de hits **tras el filtrado**, igual
+> que en `CollectionEngine`: SQL solo hace el índice + prefiltro LIKE (traer los candidatos);
+> los wheres / borrados lógicos / ordenación / paginación ocurren en memoria. La paginación no
+> puede delegarse al `LIMIT/OFFSET` de SQL — las filas coincidentes fuera de la ventana
+> quedarían inalcanzables para siempre.
 
 ### Campos Reservados
 
@@ -353,10 +357,12 @@ impl Searchable for Article {
 
 ## Mascota del Proyecto
 
-![Mascota del proyecto: Scout el Sabueso de Búsqueda](svg/pet.svg)
+![Mascota del proyecto: Scout el Robot de Búsqueda](svg/pet.svg)
 
-**Scout · el Sabueso de Búsqueda** — olfatea documentos, rastrea índices. Donde hay una
-consulta, ya está él. Ilustración en [`svg/pet.svg`](svg/pet.svg); en la terminal se ve así:
+**Scout · Robot de Búsqueda** — ocho ranuras de módulos en el pecho, conecta la que quieras:
+en desarrollo el driver en memoria sin dependencias, en producción cualquier backend, sin
+tocar una línea de código de negocio.
+Ilustración en [`svg/pet.svg`](svg/pet.svg); en la terminal se ve así:
 
 ```console
 $ cargo run --example pet
@@ -364,27 +370,27 @@ $ cargo run --example pet
 
 ```
 
-      ___              ___
-     /   \            /   \
-    |     |__________|     |
-    |     /          \     |
-    |    |   o    o   |    |
-    |    |     __     |    |
-    |     \   /  \   /     |
-     \     \  \__/  /     /
-      \     \________/    /
-       \_________________/
-         \   ~~~~~~   /
-          \__________/
-             |    |
-            _|    |_
-           |__|  |__|
+                      (*)
+                       |
+         ______________|______________
+        /                             \
+        |    [o]               [o]    |
+        |_____________________________|
+                      | |
+     _________________| |_________________
+    /                                     \
+    |      +-----+-----+-----+-----+      |     [##]
+    |      |  ## |  ## |  ## |     |      |<- - - -'
+   \|      +-----+-----+-----+-----+      |/
+   o|      |  ## |  ## |  ## |  ## |      |o
+    |      +-----+-----+-----+-----+      |
+    \_____________________________________/
+            ||                   ||
+           _||_                 _||_
+          (____)               (____)
 
-
-   ,^.     ,^.     ,^.     ,^.
-
-  Scout · 嗅探猎犬 · rust-scout
-  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+  Scout · 检索机器人 · rust-scout
+  八个插槽，插哪个用哪个 —— 业务代码一行不改
 ```
 
 La mascota vive en el módulo [`rust_scout::pet`](../../../src/pet.rs) y **no añade ninguna dependencia**:

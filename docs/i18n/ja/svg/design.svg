@@ -28,7 +28,7 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">ドライバ抽象 — Engine trait が唯一の継ぎ目</text>
-  <text x="118" y="246" class="desc">必須メソッド 8 個 + 既定実装 5 個、非同期は EngineFuture で返る。8 種のバックエンドがひとつの契約を共有し、変更は設定だけ。</text>
+  <text x="118" y="246" class="desc">必須メソッド 6 個 + 既定実装 8 個（計 14 個）、非同期は EngineFuture で返る。8 種のバックエンドがひとつの契約を共有し、変更は設定だけ。</text>
   <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // または collection() / database() / ..</text>
 
   <!-- 3 -->
@@ -44,7 +44,7 @@
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">シンプル優先 — 既定で依存ゼロ</text>
-  <text x="118" y="454" class="desc">既定のメモリドライバはすぐ使え、コアの依存は serde / thiserror のみ。8 種のバックエンドは feature でゲート、必要な分だけ取り込む。</text>
+  <text x="118" y="454" class="desc">既定のメモリドライバはすぐ使え、コアの依存は serde / serde_json / thiserror のみ。8 種のバックエンドは feature でゲート、必要な分だけ取り込む。</text>
   <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
@@ -52,6 +52,6 @@
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">安全境界 — 入力検証 + 出力エスケープ</text>
-  <text x="118" y="558" class="desc">索引名はまず validate_index_name で検証（空白 / スラッシュ / 先頭ドットを拒否）、HTTP エンジンの index と id は RFC 3986 でパーセント符号化される。</text>
+  <text x="118" y="558" class="desc">索引名は validate_index_name で検証（空白 / スラッシュ / 先頭ドット、* ? , + と先頭 -/_ を拒否）、HTTP エンジンの index と id は RFC 3986 でパーセント符号化される。</text>
   <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>
