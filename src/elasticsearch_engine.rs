@@ -141,9 +141,6 @@ impl Engine for ElasticsearchEngine {
         })
     }
 
-    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
-        result.ids()
-    }
 
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {

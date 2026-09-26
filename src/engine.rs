@@ -26,7 +26,11 @@ pub trait Engine: Send + Sync {
         page: usize,
         per_page: usize,
     ) -> EngineFuture<'a, SearchResult>;
-    fn map_ids(&self, result: &SearchResult) -> Vec<String>;
+    /// 从查询结果里取出命中 id。默认即 [`SearchResult::ids`]，八个驱动行为
+    /// 一致；只有需要改写 id 形态（前缀、规范化）的驱动才覆写。
+    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
+        result.ids()
+    }
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()>;
     fn create_index<'a>(
         &'a self,

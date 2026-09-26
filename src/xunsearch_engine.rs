@@ -374,9 +374,6 @@ impl Engine for XunSearchEngine {
         })
     }
 
-    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
-        result.ids()
-    }
 
     fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
         // COMMIT 保证 SUBMIT 数据落盘；504 BUSY / 406 RUNNING 视为成功（已入队）。

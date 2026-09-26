@@ -12,46 +12,46 @@
     </style>
   </defs>
 
-  <text x="550" y="42" text-anchor="middle" class="title">Filosofia de design</text>
+  <text x="550" y="42" text-anchor="middle" class="title">Filosofia de Design</text>
   <text x="550" y="66" text-anchor="middle" class="sub">Cinco princípios de design — cada um corresponde a uma decisão concreta no código</text>
 
   <!-- 1 -->
   <rect x="40" y="90" width="1020" height="92" class="card"/>
   <rect x="60" y="106" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="132" text-anchor="middle" class="num">1</text>
-  <text x="118" y="122" class="name">API encadeada no estilo Scout</text>
-  <text x="118" y="142" class="desc">Mantém a mentalidade do Laravel Scout: construa a consulta primeiro, depois execute com uma única chamada. A separação entre consulta e execução facilita a reutilização e os testes.</text>
+  <text x="118" y="122" class="name">API Encadeada ao Estilo Scout</text>
+  <text x="118" y="142" class="desc">Segue o modelo do Laravel Scout: construir a consulta e executá-la uma vez. Separar consulta de execução facilita a reutilização e os testes.</text>
   <text x="118" y="162" class="code">let b = SearchBuilder::new(q).within(i).where_field(f, v).order_by(k, true).take(10);</text>
 
   <!-- 2 -->
   <rect x="40" y="194" width="1020" height="92" class="card"/>
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
-  <text x="118" y="226" class="name">Abstração de drivers — o trait Engine é a única junção</text>
-  <text x="118" y="246" class="desc">8 operações definem o contrato unificado, com retorno assíncrono EngineFuture. Trocar de backend = mudar a configuração, zero alterações no código de negócios.</text>
-  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::elasticsearch(host, key)).engine()?;  // ou collection()</text>
+  <text x="118" y="226" class="name">Abstração de Drivers — o Engine trait é a única costura</text>
+  <text x="118" y="246" class="desc">8 métodos obrigatórios + 5 com default (13 no total), async via EngineFuture. Oito backends, um contrato — trocar de backend = mudar a configuração.</text>
+  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // ou collection() / database() / ..</text>
 
   <!-- 3 -->
   <rect x="40" y="298" width="1020" height="92" class="card"/>
   <rect x="60" y="314" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="340" text-anchor="middle" class="num">3</text>
-  <text x="118" y="330" class="name">Contrato de dados em primeiro lugar — serde JSON</text>
-  <text x="118" y="350" class="desc">Escrita, consulta e resultados são dados JSON estruturados, independentes do driver. Searchable faz a ponte entre modelos de negócio e documentos.</text>
-  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total }</text>
+  <text x="118" y="330" class="name">Contrato de Dados Primeiro — serde JSON</text>
+  <text x="118" y="350" class="desc">Escritas, consultas e resultados são dados JSON estruturados, independentes do driver. O Searchable faz a ponte entre modelos de negócio e documentos.</text>
+  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total, facets? }</text>
 
   <!-- 4 -->
   <rect x="40" y="402" width="1020" height="92" class="card"/>
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
-  <text x="118" y="434" class="name">Simplicidade primeiro — zero dependências por padrão</text>
-  <text x="118" y="454" class="desc">O driver em memória padrão funciona imediatamente, dependendo apenas de serde/thiserror; o driver Elasticsearch é um feature opcional, ativado sob demanda.</text>
-  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"]   // cargo add rust-scout --features elasticsearch</text>
+  <text x="118" y="434" class="name">Simplicidade Primeiro — Zero Dependências por Padrão</text>
+  <text x="118" y="454" class="desc">Driver em memória por padrão, sem deps além de serde / thiserror. Cada backend tem a sua feature — o que não se usa não compila.</text>
+  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
   <rect x="40" y="506" width="1020" height="92" class="card"/>
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
-  <text x="118" y="538" class="name">Limites de segurança — validação de entrada + escape de saída</text>
-  <text x="118" y="558" class="desc">O nome do índice é validado por validate_index_name antes de entrar na URL; id/index passam por codificação percentual RFC 3986, eliminando injeção de caminhos e escrita em índices errados.</text>
-  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) →  /{index}/_doc/{id}</text>
+  <text x="118" y="538" class="name">Limite de Segurança — Validar a Entrada + Escapar a Saída</text>
+  <text x="118" y="558" class="desc">O nome do índice passa por validate_index_name (rejeita espaços, barras, ponto inicial); os drivers HTTP codificam depois index e id segundo a RFC 3986.</text>
+  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

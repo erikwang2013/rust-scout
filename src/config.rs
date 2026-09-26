@@ -2,24 +2,45 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// 驱动配置。
+///
+/// 字段对齐 `webman-scout` 的 Scout 配置形状，其中一部分目前**只是配置占位、
+/// 驱动不会读取**（见各字段说明）。真正生效的是 `driver`、`options` 和
+/// 各后端构造器写入的连接参数。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScoutConfig {
     #[serde(default = "default_driver")]
     pub driver: String,
+    /// 索引名前缀。**尚未生效**：只有 [`ScoutConfig::index_name`] 会读它，
+    /// 而各驱动都直接使用传入的索引名、不经过该方法。设置它不会给索引加前缀。
     #[serde(default)]
     pub prefix: String,
+    /// 队列开关。配置占位，当前无写入队列实现（`queue` 与
+    /// `after_commit` 都属此列）。
     #[serde(default)]
     pub queue: bool,
+    /// 提交后同步。配置占位，见 [`ScoutConfig::queue`]。
     #[serde(default)]
     pub after_commit: bool,
+    /// 软删除开关。配置占位；软删除能力由 [`Engine::soft_delete`] 与
+    /// [`SearchBuilder::with_trashed`] 控制，与此字段无关。
+    ///
+    /// [`Engine::soft_delete`]: crate::Engine::soft_delete
+    /// [`SearchBuilder::with_trashed`]: crate::SearchBuilder::with_trashed
     #[serde(default)]
     pub soft_delete: bool,
+    /// 模型 id 识别开关。配置占位，当前无效。
     #[serde(default)]
     pub identify: bool,
+    /// 批量写入分块大小。配置占位；批量接口由调用方自行分块。
     #[serde(default = "default_chunk")]
     pub chunk_searchable: usize,
+    /// 批量删除分块大小。配置占位，见 [`ScoutConfig::chunk_searchable`]。
     #[serde(default = "default_chunk")]
     pub chunk_unsearchable: usize,
+    /// 驱动专属参数，**会被读取**：键形如 `elasticsearch.host` /
+    /// `database.url` / `algolia.app_id`，由 [`EngineManager`](crate::EngineManager)
+    /// 在构造驱动时取用。
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub options: HashMap<String, serde_json::Value>,
 }
@@ -107,6 +128,10 @@ impl ScoutConfig {
         self.options.get(key)
     }
 
+    /// 校验索引名并拼上 [`prefix`](ScoutConfig::prefix)。
+    ///
+    /// 注意：各驱动**不经过**这里，它们直接用传入的索引名。本方法目前只有
+    /// 调用方自己用得到，`prefix` 字段因此不会自动生效。
     pub fn index_name(&self, index: &str) -> crate::Result<String> {
         crate::validate_index_name(index)?;
         Ok(format!("{}{}", self.prefix, index))

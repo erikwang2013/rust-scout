@@ -151,9 +151,6 @@ impl Engine for TypesenseEngine {
         let per_page = per_page.max(1);
         Box::pin(async move { self.search_page(builder, page, per_page).await })
     }
-    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
-        result.ids()
-    }
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;

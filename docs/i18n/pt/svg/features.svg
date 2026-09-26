@@ -1,95 +1,133 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 590" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="featTitle">
+  <title id="featTitle">Design de funcionalidades do rust-scout: 12 capacidades, todas expostas pelo Engine trait</title>
   <defs>
     <style>
       .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
       .sub   { font-size: 13px; fill: #64748b; }
-      .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; rx: 10; }
-      .card:hover { stroke: #2563eb; }
-      .name  { font-size: 15px; font-weight: 600; fill: #0f172a; }
-      .desc  { font-size: 12px; fill: #475569; }
-      .api   { font-size: 10.5px; fill: #2563eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-      .ico   { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.2; rx: 6; }
+      .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .name  { font-size: 14px; font-weight: 600; fill: #0f172a; }
+      .desc  { font-size: 11px; fill: #475569; }
+      .api   { font-size: 10px; fill: #2563eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ico   { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.2; }
+      .ico-t { font-size: 17px; font-weight: 700; fill: #2563eb; }
+      .n     { font-size: 10px; font-weight: 700; fill: #94a3b8; }
     </style>
   </defs>
 
-  <text x="550" y="42" text-anchor="middle" class="title">Recursos</text>
-  <text x="550" y="66" text-anchor="middle" class="sub">Da construção de consultas à troca de drivers — tudo exposto pelo trait unificado Engine</text>
+  <text x="550" y="42" text-anchor="middle" class="title">Design de Funcionalidades</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">12 capacidades — consulta, filtro, ordem, paginação, ciclo de vida, lote, drivers, segurança — tudo via o Engine trait</text>
 
-  <!-- 1 Consultas encadeadas -->
-  <rect x="40" y="100" width="330" height="140" class="card"/>
-  <rect x="60" y="118" width="40" height="40" class="ico"/>
-  <text x="80" y="144" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">Q</text>
-  <text x="115" y="136" class="name">Construção de consultas encadeadas</text>
-  <text x="115" y="156" class="desc">Monte uma consulta completa em uma linha</text>
-  <text x="60" y="206" class="api">SearchBuilder::new(&#34;rust&#34;)</text>
-  <text x="60" y="222" class="api">  .within(&#34;books&#34;).take(10)</text>
+  <!-- ========== Linha 1: construção de consultas ========== -->
+  <rect x="40" y="100" width="240" height="142" rx="10" class="card"/>
+  <rect x="58" y="116" width="36" height="36" rx="8" class="ico"/>
+  <text x="76" y="140" text-anchor="middle" class="ico-t">Q</text>
+  <text x="104" y="132" class="name">Consulta Encadeada</text>
+  <text x="104" y="150" class="desc">Consulta e execução</text>
+  <text x="58" y="182" class="desc">Monta-se um SearchBuilder,</text>
+  <text x="58" y="198" class="desc">e executa-se uma vez, async.</text>
+  <text x="58" y="226" class="api">SearchBuilder::new(q)</text>
 
-  <!-- 2 Busca full-text -->
-  <rect x="385" y="100" width="330" height="140" class="card"/>
-  <rect x="405" y="118" width="40" height="40" class="ico"/>
-  <text x="425" y="144" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">T</text>
-  <text x="460" y="136" class="name">Busca full-text</text>
-  <text x="460" y="156" class="desc">Substring no driver em memória · no ES,</text>
-  <text x="460" y="172" class="desc">sintaxe query_string</text>
-  <text x="405" y="206" class="api">query: &#34;rust&#34; / &#34;type:book&#34;</text>
+  <rect x="300" y="100" width="240" height="142" rx="10" class="card"/>
+  <rect x="318" y="116" width="36" height="36" rx="8" class="ico"/>
+  <text x="336" y="140" text-anchor="middle" class="ico-t">T</text>
+  <text x="364" y="132" class="name">Pesquisa Integral</text>
+  <text x="364" y="150" class="desc">string vazia = todos</text>
+  <text x="318" y="182" class="desc">ES usa sintaxe query_string</text>
+  <text x="318" y="198" class="desc">(campo:valor / fuzzy / AND)</text>
+  <text x="318" y="226" class="api">query: "rust" · "title:rust"</text>
 
-  <!-- 3 Filtro exato -->
-  <rect x="730" y="100" width="330" height="140" class="card"/>
-  <rect x="750" y="118" width="40" height="40" class="ico"/>
-  <text x="770" y="144" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">=</text>
-  <text x="805" y="136" class="name">Filtro exato</text>
-  <text x="805" y="156" class="desc">Igualdade de campos (mapeada para term no ES)</text>
-  <text x="750" y="206" class="api">.where_field(&#34;status&#34;, &#34;published&#34;)</text>
+  <rect x="560" y="100" width="240" height="142" rx="10" class="card"/>
+  <rect x="578" y="116" width="36" height="36" rx="8" class="ico"/>
+  <text x="596" y="140" text-anchor="middle" class="ico-t">=</text>
+  <text x="624" y="132" class="name">Filtro Exato</text>
+  <text x="624" y="150" class="desc">Correspondência de igualdade</text>
+  <text x="578" y="182" class="desc">Números, booleanos e strings</text>
+  <text x="578" y="198" class="desc">comparam por tipo JSON exato.</text>
+  <text x="578" y="226" class="api">.where_field("status", "ok")</text>
 
-  <!-- 4 Filtro de conjuntos -->
-  <rect x="40" y="255" width="330" height="140" class="card"/>
-  <rect x="60" y="273" width="40" height="40" class="ico"/>
-  <text x="80" y="299" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">∈</text>
-  <text x="115" y="291" class="name">Filtro de conjuntos</text>
-  <text x="115" y="311" class="desc">Semântica IN / NOT IN (mapeada</text>
-  <text x="115" y="327" class="desc">para terms / must_not terms no ES)</text>
-  <text x="60" y="361" class="api">.where_in(&#34;tags&#34;, [&#34;a&#34;, &#34;b&#34;])</text>
-  <text x="60" y="377" class="api">.where_not_in(&#34;tags&#34;, [&#34;x&#34;])</text>
+  <rect x="820" y="100" width="240" height="142" rx="10" class="card"/>
+  <rect x="838" y="116" width="36" height="36" rx="8" class="ico"/>
+  <text x="856" y="140" text-anchor="middle" class="ico-t">∈</text>
+  <text x="884" y="132" class="name">Filtro de Conjunto</text>
+  <text x="884" y="150" class="desc">IN / NOT IN</text>
+  <text x="838" y="182" class="desc">Acumulável; um IN vazio</text>
+  <text x="838" y="198" class="desc">não corresponde a nada.</text>
+  <text x="838" y="226" class="api">.where_in("tags", [..])</text>
 
-  <!-- 5 Ordenação -->
-  <rect x="385" y="255" width="330" height="140" class="card"/>
-  <rect x="405" y="273" width="40" height="40" class="ico"/>
-  <text x="425" y="299" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">⇅</text>
-  <text x="460" y="291" class="name">Ordenação multi-campo</text>
-  <text x="460" y="311" class="desc">Suporta asc / desc, combináveis</text>
-  <text x="405" y="361" class="api">.order_by(&#34;created_at&#34;, true)</text>
+  <!-- ========== Linha 2: tratamento de resultados ========== -->
+  <rect x="40" y="257" width="240" height="142" rx="10" class="card"/>
+  <rect x="58" y="273" width="36" height="36" rx="8" class="ico"/>
+  <text x="76" y="297" text-anchor="middle" class="ico-t">⇅</text>
+  <text x="104" y="289" class="name">Ordenar por Campos</text>
+  <text x="104" y="307" class="desc">asc / desc, acumuláveis</text>
+  <text x="58" y="339" class="desc">Comparações entre tipos são</text>
+  <text x="58" y="355" class="desc">estáveis; sem ordem, por id.</text>
+  <text x="58" y="383" class="api">.order_by("created_at", true)</text>
 
-  <!-- 6 Paginação -->
-  <rect x="730" y="255" width="330" height="140" class="card"/>
-  <rect x="750" y="273" width="40" height="40" class="ico"/>
-  <text x="770" y="299" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">P</text>
-  <text x="805" y="291" class="name">Paginação</text>
-  <text x="805" y="311" class="desc">Corte por offset + paginação por página</text>
-  <text x="750" y="361" class="api">.take(10).skip(20)</text>
-  <text x="750" y="377" class="api">engine.paginate(&amp;b, page, per)</text>
+  <rect x="300" y="257" width="240" height="142" rx="10" class="card"/>
+  <rect x="318" y="273" width="36" height="36" rx="8" class="ico"/>
+  <text x="336" y="297" text-anchor="middle" class="ico-t">P</text>
+  <text x="364" y="289" class="name">Paginação</text>
+  <text x="364" y="307" class="desc">offset + número de página</text>
+  <text x="318" y="339" class="desc">take / skip truncam por offset;</text>
+  <text x="318" y="355" class="desc">paginate usa páginas (base 1).</text>
+  <text x="318" y="383" class="api">engine.paginate(&amp;b, page, per)</text>
 
-  <!-- 7 Múltiplos índices -->
-  <rect x="40" y="410" width="330" height="140" class="card"/>
-  <rect x="60" y="428" width="40" height="40" class="ico"/>
-  <text x="80" y="454" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">I</text>
-  <text x="115" y="446" class="name">Múltiplos índices</text>
-  <text x="115" y="466" class="desc">Campo index por documento, padrão</text>
-  <text x="115" y="482" class="desc">&#34;default&#34;, definível na escrita e na consulta</text>
-  <text x="60" y="516" class="api">SearchDocument.index / builder.within()</text>
+  <rect x="560" y="257" width="240" height="142" rx="10" class="card"/>
+  <rect x="578" y="273" width="36" height="36" rx="8" class="ico"/>
+  <text x="596" y="297" text-anchor="middle" class="ico-t">I</text>
+  <text x="624" y="289" class="name">Múltiplos Índices</text>
+  <text x="624" y="307" class="desc">rota por documento</text>
+  <text x="578" y="339" class="desc">escritas vão para doc.index,</text>
+  <text x="578" y="355" class="desc">com fallback para "default".</text>
+  <text x="578" y="383" class="api">.within("books") · doc.index</text>
 
-  <!-- 8 Ciclo de vida do índice -->
-  <rect x="385" y="410" width="330" height="140" class="card"/>
-  <rect x="405" y="428" width="40" height="40" class="ico"/>
-  <text x="425" y="454" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">L</text>
-  <text x="460" y="446" class="name">Ciclo de vida do índice</text>
-  <text x="460" y="466" class="desc">Criar / atualizar / excluir índice</text>
-  <text x="405" y="516" class="api">create_index · flush · delete_index</text>
+  <rect x="820" y="257" width="240" height="142" rx="10" class="card"/>
+  <rect x="838" y="273" width="36" height="36" rx="8" class="ico"/>
+  <text x="856" y="297" text-anchor="middle" class="ico-t">S</text>
+  <text x="884" y="289" class="name">Eliminação Lógica</text>
+  <text x="884" y="307" class="desc">campo __soft_deleted</text>
+  <text x="838" y="339" class="desc">Excluído por padrão; a consulta</text>
+  <text x="838" y="355" class="desc">pode incluí-lo ou vê-lo só ele.</text>
+  <text x="838" y="383" class="api">.with_trashed()/.only_trashed()</text>
 
-  <!-- 9 Drivers plugáveis -->
-  <rect x="730" y="410" width="330" height="140" class="card"/>
-  <rect x="750" y="428" width="40" height="40" class="ico"/>
-  <text x="770" y="454" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">D</text>
-  <text x="805" y="446" class="name">Drivers plugáveis</text>
-  <text x="805" y="466" class="desc">Troque o backend alterando só a configuração</text>
-  <text x="750" y="516" class="api">ScoutConfig::elasticsearch(host, key)</text>
+  <!-- ========== Linha 3: índices e drivers ========== -->
+  <rect x="40" y="414" width="240" height="142" rx="10" class="card"/>
+  <rect x="58" y="430" width="36" height="36" rx="8" class="ico"/>
+  <text x="76" y="454" text-anchor="middle" class="ico-t">L</text>
+  <text x="104" y="446" class="name">Ciclo do Índice</text>
+  <text x="104" y="464" class="desc">criar / flush / apagar / refazer</text>
+  <text x="58" y="496" class="desc">semântica do reindex varia:</text>
+  <text x="58" y="512" class="desc">memória troca; ES usa _reindex.</text>
+  <text x="58" y="540" class="api">create_index · flush · reindex</text>
+
+  <rect x="300" y="414" width="240" height="142" rx="10" class="card"/>
+  <rect x="318" y="430" width="36" height="36" rx="8" class="ico"/>
+  <text x="336" y="454" text-anchor="middle" class="ico-t">B</text>
+  <text x="364" y="446" class="name">Lote e Eliminação</text>
+  <text x="364" y="464" class="desc">menos idas e voltas</text>
+  <text x="318" y="496" class="desc">update_bulk / delete_bulk</text>
+  <text x="318" y="512" class="desc">default item a item, trocável.</text>
+  <text x="318" y="540" class="api">delete_in(index, ids)</text>
+
+  <rect x="560" y="414" width="240" height="142" rx="10" class="card"/>
+  <rect x="578" y="430" width="36" height="36" rx="8" class="ico"/>
+  <text x="596" y="454" text-anchor="middle" class="ico-t">D</text>
+  <text x="624" y="446" class="name">Drivers Plugáveis</text>
+  <text x="624" y="464" class="desc">8 backends</text>
+  <text x="578" y="496" class="desc">collection · elasticsearch ·</text>
+  <text x="578" y="512" class="desc">meilisearch · typesense · algolia</text>
+  <text x="578" y="540" class="api">ScoutConfig::meilisearch(..)</text>
+
+  <rect x="820" y="414" width="240" height="142" rx="10" class="card"/>
+  <rect x="838" y="430" width="36" height="36" rx="8" class="ico"/>
+  <text x="856" y="454" text-anchor="middle" class="ico-t">#</text>
+  <text x="884" y="446" class="name">Limite de Segurança</text>
+  <text x="884" y="464" class="desc">validar + escapar</text>
+  <text x="838" y="496" class="desc">índice → validate_index_name</text>
+  <text x="838" y="512" class="desc">e RFC 3986 percent-encode → URL.</text>
+  <text x="838" y="540" class="api">percent_encode(index)</text>
+
+  <!-- nota de rodapé: a mascote -->
+  <text x="550" y="584" text-anchor="middle" class="desc">Oito drivers partilham um contrato — mudar de backend é editar ScoutConfig, não o negócio.</text>
 </svg>

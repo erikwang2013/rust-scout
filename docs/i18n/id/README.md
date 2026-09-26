@@ -6,7 +6,18 @@
 
 [简体中文](../../../README.md) · [English](../en/README.md) · [日本語](../ja/README.md) · [한국어](../ko/README.md) · Bahasa Indonesia · [Русский](../ru/README.md) · [Deutsch](../de/README.md) · [Français](../fr/README.md) · [Español](../es/README.md) · [Português](../pt/README.md) · [हिन्दी](../hi/README.md) · [العربية](../ar/README.md) · [বাংলা](../bn/README.md)
 
-**Abstraksi pustaka pencarian teks lengkap rust-scout** — lapisan antarmuka pencarian teks lengkap yang ringan untuk Rust. Terinspirasi oleh model mental query berantai [Laravel Scout](https://laravel.com/docs/scout), lapisan ini mengabstraksi berbagai backend seperti in-memory, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite melalui satu trait `Engine`: **driver in-memory tanpa dependensi untuk pengembangan, beralih ke backend apa pun secara mulus di produksi, tanpa mengubah satu baris pun kode bisnis.**
+**Abstraksi pustaka pencarian teks lengkap rust-scout** — lapisan antarmuka pencarian teks
+lengkap yang ringan untuk Rust. Mengadopsi model mental kueri berantai dari
+[Laravel Scout](https://laravel.com/docs/scout), pustaka ini mengabstraksi **8 backend**
+(in-memory, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite, XunSearch,
+Null) melalui satu trait `Engine`: **driver in-memory tanpa dependensi untuk pengembangan,
+beralih mulus ke backend apa pun di produksi, tanpa mengubah satu baris pun kode bisnis.**
+
+![Hewan peliharaan proyek: Scout si Search Hound](svg/pet.svg)
+
+> Hewan peliharaan proyek **Scout si Search Hound** — mengendus dokumen, melacak indeks.
+> Ia bukan hanya ada di dokumentasi: ia hadir di banner terminal dan di petunjuk kesalahan,
+> lihat [Hewan Peliharaan Proyek](#hewan-peliharaan-proyek).
 
 ```rust
 let result = engine.search(
@@ -20,25 +31,36 @@ let result = engine.search(
 
 ## Fitur
 
-| Kemampuan | Deskripsi |
+| Kemampuan | Keterangan |
 |------|------|
-| 🔍 Pencarian teks lengkap | Driver in-memory: pencocokan substring; driver ES: sintaks `query_string` (`field:nilai`) |
-| ⚙️ Query berantai | `SearchBuilder`: query / within / where_field / where_in / where_not_in / order_by / take / skip |
-| 🎯 Filter presisi | Pencocokan kesetaraan (ES → `term`), pencocokan himpunan (ES → `terms` / `must_not`) |
-| 📄 Sortir multi-bidang | asc / desc dapat ditumpuk |
-| 📃 Paginasi | `take`/`skip` pemotongan offset + paginasi halaman `paginate(page, per_page)` |
-| 🗂️ Multi-indeks | Penentuan rute lewat field `index` tingkat dokumen, indeks default `"default"` |
-| 🔄 Siklus hidup indeks | Alur lengkap `create_index` / `flush` / `delete_index` |
-| 🔌 Driver pluggable | Default in-memory tanpa dependensi; feature `elasticsearch` / `meilisearch` / `typesense` / `algolia` / `database` / `null` dapat diaktifkan sesuai kebutuhan; `xunsearch` adalah stub placeholder |
-| 🔒 Batas keamanan | Validasi nama indeks (`validate_index_name`) + percent-encoding RFC 3986 untuk mencegah injeksi path |
+| 🔍 Pencarian teks lengkap | Driver in-memory mencocokkan substring; driver HTTP memakai sintaks asli backend (ES: `query_string`, `field:value`) |
+| ⚙️ Kueri berantai | `SearchBuilder`: query / within / where_field / where_in / where_not_in / order_by / take / skip / option |
+| 🎯 Pemfilteran tepat | Pencocokan kesamaan (ES → `term`), pencocokan himpunan (ES → `terms` / `must_not`) |
+| 📄 Pengurutan multi-field | asc / desc dapat ditumpuk, urutan pasti saat membandingkan tipe JSON berbeda |
+| 📃 Paginasi | Pemotongan offset `take`/`skip` + paginasi nomor halaman `paginate(page, per_page)` |
+| 🗂️ Banyak indeks | Perutean lewat field `index` tingkat dokumen, indeks bawaan `"default"` |
+| 🔄 Siklus hidup indeks | Alur lengkap `create_index` / `flush` / `reindex` / `delete_index` |
+| 🗑️ Penghapusan lunak | `soft_delete` memberi tanda `__soft_deleted`; penyaringan tiga mode `with_trashed()` / `only_trashed()` |
+| 📦 Operasi massal | `update_bulk` / `delete_bulk` mengurangi pulang-pergi; `delete_in` menghapus tepat pada indeks tertentu |
+| 🔌 Driver plug-and-play | Bawaan in-memory tanpa dependensi; 8 backend masing-masing di balik feature — yang tak dipakai tidak dikompilasi |
+| 🔒 Batas keamanan | Validasi nama indeks (`validate_index_name`) + pengodean persen RFC 3986 untuk mencegah injeksi path |
+| 🐕 Hewan peliharaan | Scout si Search Hound: banner terminal + petunjuk penelusuran per kesalahan (`rust_scout::pet`) |
 
 ## Arsitektur
 
 ![Arsitektur](svg/architecture.svg)
 
-## Ringkasan Fitur
+Lima lapisan: aplikasi → kontrak data (serde JSON) → inti (`EngineManager` + trait `Engine`)
+→ driver (menurut cara transmisi, empat kelompok, total 8 driver) → penyimpanan. Satu-satunya
+sambungan antar lapisan adalah trait `Engine`.
+
+## Desain Fitur
 
 ![Fitur](svg/features.svg)
+
+12 kemampuan: kueri berantai, teks lengkap, filter tepat/himpunan, pengurutan, paginasi,
+banyak indeks, penghapusan lunak, siklus hidup indeks, penghapusan massal dan tepat,
+driver plug-and-play, batas keamanan.
 
 ## Filosofi Desain
 
@@ -46,53 +68,78 @@ let result = engine.search(
 
 ## Siklus Hidup
 
-![Siklus Hidup](svg/lifecycle.svg)
+![Siklus hidup](svg/lifecycle.svg)
+
+Tujuh tahap: buat → tulis → flush → cari → hapus dokumen → indeks ulang → musnahkan.
+Bagian bawah diagram membandingkan perilaku empat keluarga driver di setiap tahap.
 
 ## Struktur Proyek
 
 ```
 rust-scout/
-├── Cargo.toml            # 依赖与 feature 声明（elasticsearch 可选）
+├── Cargo.toml              # dependensi dan feature (default = [], tanpa dependensi)
 ├── src/
-│   ├── lib.rs            # crate 根：模块导出 + 公开类型再导出
-│   ├── engine.rs         # Engine trait：驱动统一接口（8 个操作）
-│   ├── manager.rs        # EngineManager：门面，按配置分发驱动
-│   ├── config.rs         # ScoutConfig + validate_index_name
-│   ├── builder.rs        # SearchBuilder：链式查询构建与匹配/排序逻辑
-│   ├── document.rs       # SearchDocument：写入文档（serde JSON 契约）
-│   ├── result.rs         # SearchResult / SearchHit：查询结果
-│   ├── searchable.rs     # Searchable / SearchableStore：业务模型桥接
-│   ├── error.rs          # ScoutError + Result<T>
-│   ├── collection_engine.rs  # 内存驱动（默认）
-│   └── elasticsearch_engine.rs # ES/OpenSearch 驱动（feature 可选）
-├── tests/                # 集成测试（当前为空）
-├── examples/             # 示例（当前为空）
+│   ├── lib.rs              # akar crate: ekspor modul + re-ekspor tipe publik yang dibatasi feature
+│   │
+│   ├── engine.rs           # trait Engine: satu-satunya kontrak driver (8 wajib + 5 bawaan)
+│   ├── manager.rs          # EngineManager: fasad, mengarahkan per driver dan menyimpan Arc<dyn Engine>
+│   ├── config.rs           # ScoutConfig (8 konstruktor) + validate_index_name + percent_encode
+│   │
+│   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: kueri berantai
+│   ├── document.rs         # SearchDocument: dokumen yang ditulis (kontrak serde JSON)
+│   ├── result.rs           # SearchResult / SearchHit: hasil kueri
+│   ├── searchable.rs       # Searchable / SearchableStore: jembatan ke model bisnis
+│   ├── error.rs            # ScoutError + Result<T> + pet_hint()
+│   ├── pet.rs              # hewan peliharaan: Scout si Search Hound (banner + petunjuk kesalahan)
+│   │
+│   ├── collection_engine.rs    # driver in-memory (bawaan, tanpa dependensi)
+│   ├── null_engine.rs          # driver kosong: buang tulisan, selalu kosong          [null]
+│   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                              [elasticsearch]
+│   │   └── query.rs            #   pembuatan query_string dan penguraian respons
+│   ├── meilisearch_engine.rs   # Meilisearch (REST)                                  [meilisearch]
+│   ├── typesense_engine.rs     # Typesense (REST)                                    [typesense]
+│   │   └── typesense_query.rs  #   parameter pencarian dan pembuatan filter_by
+│   ├── algolia_engine.rs       # Algolia (REST cloud terkelola)                      [algolia]
+│   ├── database_engine.rs      # SQLite (sqlx, saring kasar LIKE + saring halus memori) [database]
+│   ├── xunsearch_engine.rs     # XunSearch: protokol TCP asli xunsearchd             [xunsearch]
+│   │   ├── xunsearch_query.rs  #   kodek paket + skema field ini
+│   │   └── xunsearch_tests.rs  #   uji end-to-end dengan mock server
+│   │
+│   └── (uji unit disisipkan di akhir tiap modul: #[cfg(test)] mod tests)
+├── tests/                  # uji integrasi (masih kosong, uji ada di dalam src)
+├── examples/
+│   └── pet.rs              # cargo run --example pet: banner hewan + demo petunjuk kesalahan
 └── docs/
-    ├── svg/              # 本 README 引用的架构/功能/设计/生命周期图
-    └── superpowers/specs/ # 设计文档
+    ├── svg/                # hewan peliharaan + diagram arsitektur / fitur / desain / siklus hidup
+    ├── i18n/               # README dan SVG terkait untuk 12 bahasa
+    ├── coin/               # kode QR donasi
+    └── superpowers/specs/  # dokumen desain
 ```
 
-## Memulai dengan Cepat
+> Label `[feature]` menandai Cargo feature yang dibutuhkan driver. Bila tidak aktif,
+> `EngineManager` mengembalikan `ScoutError::Unsupported`, bukan menurunkan kemampuan diam-diam.
+
+## Mulai Cepat
 
 ### 1. Tambahkan dependensi
 
 ```toml
 [dependencies]
-rust-scout = "0.1"
-tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
+rust-scout = "0.3"
+tokio = { version = "1", features = ["macros", "rt"] }   # hanya untuk contoh
 ```
 
-### 2. Contoh minimal (driver in-memory default)
+### 2. Contoh minimal (driver in-memory bawaan)
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
 
 #[tokio::main]
 async fn main() -> rust_scout::Result<()> {
-    // 默认驱动：内存 CollectionEngine，零依赖开箱即用
+    // driver bawaan: CollectionEngine in-memory, tanpa dependensi
     let engine = EngineManager::new(ScoutConfig::collection()).engine()?;
 
-    // 写入文档
+    // tulis dokumen
     let mut book = SearchDocument::new(
         "book-1",
         serde_json::json!({
@@ -105,7 +152,7 @@ async fn main() -> rust_scout::Result<()> {
     book.index = Some("books".to_string());
     engine.update(&[book]).await?;
 
-    // 查询
+    // kueri
     let result = engine
         .search(
             SearchBuilder::new("rust")
@@ -124,44 +171,56 @@ async fn main() -> rust_scout::Result<()> {
 }
 ```
 
-## Panduan Penggunaan
+## Penggunaan
 
-### Penyusunan Query (SearchBuilder)
+### Membangun Kueri (SearchBuilder)
 
-Semua operasi query disusun secara berantai dan akhirnya diserahkan ke `engine.search(&builder)`:
+Semua operasi kueri dirangkai berantai lalu diserahkan ke `engine.search(&builder)`:
 
 ```rust
-let builder = SearchBuilder::new("全文关键词")   // 全文搜索（可选，空串 = 匹配全部）
-    .within("articles")                          // 指定索引（可选，默认 "default"）
-    .where_field("status", "published")          // 等值过滤
-    .where_in("tags", ["rust", "async"])         // IN 集合
-    .where_not_in("category", ["draft"])         // NOT IN 集合
-    .order_by("created_at", true)                // 多字段排序（true = desc）
+let builder = SearchBuilder::new("kata kunci")  // teks lengkap (opsional, kosong = semua)
+    .within("articles")                          // indeks tujuan (opsional, bawaan "default")
+    .where_field("status", "published")          // filter kesamaan
+    .where_in("tags", ["rust", "async"])         // himpunan IN
+    .where_not_in("category", ["draft"])         // himpunan NOT IN
+    .order_by("created_at", true)                // urut multi-field (true = desc)
     .order_by("title", false)
-    .take(20)                                    // 每页条数
-    .skip(40);                                   // 偏移
+    .take(20)                                    // jumlah per halaman
+    .skip(40)                                    // offset
+    .option("highlight", true)                   // opsi diteruskan khusus driver
+    .with_trashed();                             // tiga mode hapus lunak: sembunyikan / sertakan / hanya itu
 ```
 
-> `query` mendukung sintaks Lucene `query_string` (berfungsi penuh pada driver ES): `"rust"`, `"title:rust AND tags:async"`, `"rust~2"` (fuzzy). Driver in-memory memprosesnya sebagai pencocokan substring.
+> `query` mendukung sintaks Lucene `query_string` (berlaku penuh di driver ES):
+> `"rust"`, `"title:rust AND tags:async"`, `"rust~2"` (fuzzy). Driver lain memakai
+> sintaks aslinya atau pencocokan substring.
 
 ### Paginasi
 
 ```rust
-// 方式一：偏移截取
+// Cara 1: pemotongan offset
 let page2 = SearchBuilder::new("rust").within("books").skip(10).take(10);
-// 方式二：页码分页（page 从 1 起）
+// Cara 2: per nomor halaman (page mulai dari 1)
 let page2 = engine.paginate(&SearchBuilder::new("rust").within("books"), 2, 10).await?;
 ```
 
-### Multi-indeks dan Siklus Hidup
+### Banyak Indeks dan Siklus Hidup
 
 ```rust
-engine.create_index("books", serde_json::json!({})).await?;   // 建索引
-engine.update(&docs).await?;                                  // 写文档
-engine.flush("books").await?;                                 // 刷新可见性
-engine.delete(&["book-1".to_string()]).await?;                // 删文档
-engine.delete_index("books").await?;                          // 删索引
+engine.create_index("books", serde_json::json!({})).await?;    // buat indeks
+engine.update(&docs).await?;                                   // tulis dokumen
+engine.update_bulk(&docs).await?;                              // tulis massal (endpoint bulk asli bila didukung)
+engine.flush("books").await?;                                  // segarkan visibilitas
+engine.search(&builder).await?;                                // kueri
+engine.delete_in("books", &["book-1".to_string()]).await?;     // hapus dokumen dari satu indeks
+engine.soft_delete(&["book-2".to_string()]).await?;            // hapus lunak (memberi tanda)
+engine.reindex("books", "books_v2").await?;                    // bangun ulang indeks
+engine.delete_index("books").await?;                           // hapus indeks
 ```
+
+> `delete` tidak membawa informasi indeks, jadi semantiknya berbeda antar mesin
+> (driver in-memory menghapus lintas indeks, ES hanya menyentuh `default`).
+> Untuk menargetkan satu indeks secara tepat, gunakan `delete_in`.
 
 ### Beralih ke Elasticsearch / OpenSearch
 
@@ -173,22 +232,22 @@ cargo add rust-scout --features elasticsearch
 use rust_scout::{Engine, EngineManager, ScoutConfig};
 
 let config = ScoutConfig::elasticsearch(
-    "http://127.0.0.1:9200",      // 或 OpenSearch 地址
-    Some("your-api-key".into()),   // 可选：ApiKey 认证
+    "http://127.0.0.1:9200",      // atau alamat OpenSearch
+    Some("your-api-key".into()),  // opsional: autentikasi ApiKey
 );
 let engine = EngineManager::new(config).engine()?;
-// —— 之后所有操作与内存驱动完全一致 ——
+// —— selanjutnya semua operasi sama persis dengan driver in-memory ——
 ```
 
-| Item Perbandingan | CollectionEngine (default) | ElasticsearchEngine |
+| Item | CollectionEngine (bawaan) | ElasticsearchEngine |
 |--------|--------------------------|---------------------|
-| Dependensi | Hanya serde / thiserror | reqwest (saat feature diaktifkan) |
-| Teks lengkap | Pencocokan substring ter-serialisasi | `query_string` |
-| Filter | matches() di memori | term / terms / must_not |
-| Sortir | sort_hits() di memori | array sort |
+| Dependensi | hanya serde / thiserror | reqwest (saat feature aktif) |
+| Teks lengkap | Pencocokan substring hasil serialisasi | `query_string` |
+| Pemfilteran | matches() di memori | term / terms / must_not |
+| Pengurutan | sort_hits() di memori | array sort |
 | flush | no-op | `_refresh` |
-| Paginasi default | Semua hasil | size 10 |
-| Sortir default | Berdasarkan id | Berdasarkan _score |
+| Paginasi bawaan | Semua hasil | size 10 |
+| Urutan bawaan | Berdasarkan id | Berdasarkan _score |
 
 ### Beralih ke Meilisearch
 
@@ -200,47 +259,61 @@ cargo add rust-scout --features meilisearch
 use rust_scout::{Engine, EngineManager, ScoutConfig};
 
 let config = ScoutConfig::meilisearch(
-    "http://127.0.0.1:7700",   // Meilisearch 服务地址
-    "your-master-key",          // 可选：API 密钥
+    "http://127.0.0.1:7700",   // alamat layanan Meilisearch
+    "your-master-key",          // opsional: kunci API
 );
 let engine = EngineManager::new(config).engine()?;
-// —— 之后所有操作与内存驱动完全一致 ——
+// —— selanjutnya semua operasi sama persis dengan driver in-memory ——
 ```
 
 ### Perbandingan Mesin
 
-| Mesin | driver | feature | Status |
-|------|--------|---------|------|
-| In-memory (default) | `collection` | bawaan | Lengkap |
-| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | Lengkap |
-| Meilisearch | `meilisearch` | `meilisearch` | Lengkap |
-| Typesense | `typesense` | `typesense` | Lengkap |
-| Algolia | `algolia` | `algolia` | Lengkap |
-| SQLite | `database` | `database` | Lengkap |
-| Null (pengujian/penonaktifan pencarian) | `null` | `null` | Lengkap |
-| XunSearch | `xunsearch` | `xunsearch` | stub (belum diimplementasikan) |
+| Mesin | driver | feature | Transmisi | Status |
+|------|--------|---------|-----------|--------|
+| In-memory (bawaan) | `collection` | bawaan | Dalam proses | Lengkap |
+| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | HTTP REST | Lengkap |
+| Meilisearch | `meilisearch` | `meilisearch` | HTTP REST | Lengkap |
+| Typesense | `typesense` | `typesense` | HTTP REST | Lengkap |
+| Algolia | `algolia` | `algolia` | HTTP REST | Lengkap |
+| SQLite | `database` | `database` | Berkas lokal | Lengkap |
+| XunSearch | `xunsearch` | `xunsearch` | TCP asli | Lengkap |
+| Null (pengujian / menonaktifkan pencarian) | `null` | `null` | — | Lengkap |
 
-Konstruktor konfigurasi untuk mesin lainnya dapat dilihat di [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
+Konstruktor konfigurasi mesin lainnya ada di [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> Untuk mesin SQLite (`database`), `total` dihitung di lapisan SQL (indeks + filter kasar LIKE); wheres / soft delete dapat membuat `hits.len() < total` setelah penyaringan di memori — paginasi berdasarkan hits.
+> Pada mesin SQLite (`database`), `total` dihitung di lapisan SQL (indeks + saring kasar LIKE);
+> setelah penyaringan wheres / hapus lunak di memori bisa terjadi `hits.len() < total`,
+> dan paginasi mengacu pada hits.
 
-### Field Cadangan
+### Field yang Dicadangkan
 
-`__soft_deleted` adalah nama field cadangan yang digunakan oleh fitur soft-delete (`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`), yang dipakai mesin untuk menyaring dokumen yang di-soft-delete. Dokumen pengguna **tidak boleh** menggunakan nama field ini sebagai field bisnis.
+`__soft_deleted` adalah nama field yang dicadangkan untuk fitur hapus lunak
+(`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`); mesin memakainya
+untuk menyaring dokumen yang dihapus lunak. Dokumen pengguna **tidak boleh** memakai nama field
+ini sebagai field bisnis.
 
-### Penanganan Error
+### Penanganan Kesalahan
 
-Semua operasi mengembalikan `crate::Result<T>`, dengan error yang menyatu ke `ScoutError` terpadu:
+Semua operasi mengembalikan `crate::Result<T>`, dengan kesalahan menyatu ke `ScoutError` tunggal:
 
-- `InvalidIndexName` — nama indeks mengandung spasi / `/` / diawali `.`, dll. (divalidasi sebelum penulisan)
-- `InvalidResult` — field dokumen bukan objek JSON
-- `Unsupported` — feature tidak diaktifkan, dll.
-- `Json` — error serde
-- `Http` / `Backend` — error jaringan dan backend driver ES (saat feature diaktifkan)
+| Varian | Pemicu | feature |
+|---------|--------------|---------|
+| `InvalidIndexName` | nama indeks memuat spasi / `/` / `\`, diawali `.`, atau kosong (divalidasi sebelum menulis) | bawaan |
+| `InvalidResult` | field dokumen bukan objek JSON | bawaan |
+| `Unsupported` | feature driver tidak aktif, konfigurasi wajib kurang, atau mesin tidak mendukung operasi itu | bawaan |
+| `Json` | kesalahan serialisasi / deserialisasi serde | bawaan |
+| `Http` | permintaan HTTP gagal (koneksi, timeout, kode status) | empat mesin HTTP |
+| `Sqlx` | kesalahan SQLite | `database` |
+| `Backend` | backend mengembalikan respons kesalahan, pesan asli diteruskan apa adanya | empat mesin HTTP / `xunsearch` |
+| `XunSearch` / `XunSearchIo` | gagal mengurai protokol / gagal I/O TCP | `xunsearch` |
+
+Setiap varian membawa petunjuk penelusuran — lihat [`ScoutError::pet_hint()`](#hewan-peliharaan-proyek).
 
 ### Menjembatani Model Bisnis (Searchable)
 
-Implementasikan `Searchable` untuk memetakan struktur bisnis menjadi dokumen yang dapat diindeks, dan implementasikan `SearchableStore` untuk merangkum tiga operasi `index_documents` / `remove_documents` / `search`:
+Implementasikan `Searchable` untuk memetakan struktur bisnis menjadi dokumen yang dapat
+diindeks, dan `SearchableStore` untuk membungkus tiga operasi `index_documents` /
+`remove_documents` / `search`:
 
 ```rust
 use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
@@ -255,18 +328,82 @@ impl Searchable for Article {
 }
 ```
 
+## Hewan Peliharaan Proyek
+
+![Hewan peliharaan proyek: Scout si Search Hound](svg/pet.svg)
+
+**Scout · si Search Hound** — mengendus dokumen, melacak indeks: di mana ada kueri, di situ ada dia.
+Versi gambarnya di [`svg/pet.svg`](svg/pet.svg); di terminal ia tampak seperti ini:
+
+```console
+$ cargo run --example pet
+```
+
+```
+
+      ___              ___
+     /   \            /   \
+    |     |__________|     |
+    |     /          \     |
+    |    |   o    o   |    |
+    |    |     __     |    |
+    |     \   /  \   /     |
+     \     \  \__/  /     /
+      \     \________/    /
+       \_________________/
+         \   ~~~~~~   /
+          \__________/
+             |    |
+            _|    |_
+           |__|  |__|
+
+
+   ,^.     ,^.     ,^.     ,^.
+
+  Scout · 嗅探猎犬 · rust-scout
+  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+```
+
+Hewan ini tinggal di modul [`rust_scout::pet`](../../../src/pet.rs) dan **tidak menambah dependensi apa pun**:
+
+| Item | Keterangan |
+|----|------|
+| `pet::NAME` / `pet::SPECIES` / `pet::TAGLINE` | info papan nama |
+| `pet::ART` | potret ASCII (sengaja hanya ASCII 7-bit, agar tidak miring di terminal CJK) |
+| `pet::banner()` | banner terminal; teks polos tanpa escape sequence, aman ditulis ke log |
+| `pet::hint(&err)` | petunjuk penelusuran per kesalahan, mengembalikan `&'static str` |
+| `pet::format_error(&err)` | kesalahan asli + petunjuk, dirender untuk manusia |
+| `ScoutError::pet_hint()` | petunjuk yang sama, menempel langsung pada tipe kesalahan |
+
+```rust
+use rust_scout::{pet, ScoutError};
+
+println!("{}", pet::banner());
+
+let err = ScoutError::Unsupported("feature tidak ada".into());
+eprintln!("{}", pet::format_error(&err));
+// error: unsupported operation: feature tidak ada
+//
+//   [o_o] Scout：这个后端我还没找到路 —— Cargo.toml 里对应的 feature 启用了吗？
+```
+
+> **Mengapa petunjuknya tidak langsung dimasukkan ke `Display`?** `Display` pada `ScoutError`
+> tetap satu baris dan dapat dibaca mesin — perambatan `?`, pengumpulan log, dan grep string
+> kesalahan di CI bergantung padanya. Untuk keluaran yang mudah dibaca manusia beserta petunjuk
+> hewan peliharaan, panggil `pet::format_error()`.
+
 ## Dukungan dan Donasi
 
-Jika proyek ini bermanfaat bagi Anda, silakan dukung dengan donasi ☕ — dukungan Anda adalah motivasi untuk pemeliharaan yang berkelanjutan!
+Jika proyek ini bermanfaat bagi Anda, dukunglah dengan donasi ☕ — dukungan Anda adalah dorongan untuk terus merawatnya!
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="微信打赏" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="支付宝打赏" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="Donasi via WeChat" width="130" height="130"/>
+<img src="../../../docs/alipay.png" alt="Donasi via Alipay" width="130" height="130"/>
 
-Pindai WeChat · Pindai Alipay
+Pindai dengan WeChat · Pindai dengan Alipay
 
-### Donasi Mata Uang Kripto
+### Donasi Kripto
 
 | Jaringan | Alamat Dompet | Kode QR |
 |------|----------|--------|
@@ -285,29 +422,29 @@ Pindai WeChat · Pindai Alipay
 
 **Informasi Penerima**
 
-- Nama Penerima: WANG KEXUN
-- Nomor Rekening: 881015918251
+- Nama penerima: WANG KEXUN
+- Nomor rekening penerima: 881015918251
 
 **Bank Penerima (ZA Bank)**
 
-- Kode SWIFT: `AABLHKHHXXX`
-- Nama Bank: ZA Bank Limited
-- Kode Bank: 387
-- Alamat Bank: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
+- SWIFT Code: `AABLHKHHXXX`
+- Nama bank: ZA Bank Limited
+- Kode bank: 387
+- Alamat bank: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
 
-> Berikut adalah informasi bank koresponden (bank perantara) untuk transfer lintas negara, bukan informasi bank penerima. Silakan tanyakan kepada bank pengirim apakah perlu disediakan.
+> Informasi bank koresponden (bank perantara) di bawah ini adalah untuk transfer lintas negara, bukan informasi bank penerima. Silakan tanyakan kepada bank pengirim apakah perlu disertakan.
 
-- Bank koresponden untuk transfer masuk dalam HKD, CNY, dan USD adalah **Citibank**:
-  - Nama Bank: Citibank N.A. Hong Kong
-  - Kode SWIFT: `CITIHKHXXXX`
-  - Kode Bank: 006 / Kode Cabang: 391
-  - Nama Cabang: Hong Kong Branch
-  - Alamat Bank: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- Bank koresponden untuk transfer masuk dalam mata uang lain adalah **BNY Mellon**:
-  - Nama Bank: THE BANK OF NEW YORK MELLON
-  - Kode SWIFT: `IRVTUS3NXXX`
-  - Alamat Bank: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
+- Bank koresponden untuk transfer dalam HKD, CNY, dan USD adalah **Citibank**:
+  - Nama bank: Citibank N.A. Hong Kong
+  - SWIFT Code: `CITIHKHXXXX`
+  - Kode bank: 006 / Kode cabang: 391
+  - Nama cabang: Hong Kong Branch
+  - Alamat bank: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
+- Bank koresponden untuk transfer dalam mata uang lain adalah **BNY Mellon**:
+  - Nama bank: THE BANK OF NEW YORK MELLON
+  - SWIFT Code: `IRVTUS3NXXX`
+  - Alamat bank: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## Lisensi
 
-MIT License. Lihat [LICENSE](../../../LICENSE) untuk detail.
+MIT License. Lihat [LICENSE](../../../LICENSE) untuk detailnya.

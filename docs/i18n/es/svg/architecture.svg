@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 660" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 840" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="archTitle">
+  <title id="archTitle">Arquitectura de rust-scout: aplicación / contrato de datos / núcleo / drivers / almacenamiento</title>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
@@ -7,76 +8,151 @@
       .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
       .sub   { font-size: 13px; fill: #64748b; }
       .layer { fill: #e2e8f0; opacity: 0.35; }
-      .box   { fill: #ffffff; stroke: #2563eb; stroke-width: 1.5; rx: 8; }
+      .box   { fill: #ffffff; stroke: #2563eb; stroke-width: 1.5; }
       .box-core { stroke: #2563eb; }
-      .box-drv  { stroke: #10b981; }
+      .box-mem  { stroke: #10b981; }
+      .box-http { stroke: #2563eb; }
+      .box-db   { stroke: #d97706; }
+      .box-tcp  { stroke: #8b5cf6; }
+      .box-null { stroke: #94a3b8; }
       .box-data { stroke: #f59e0b; }
       .name  { font-size: 14px; font-weight: 600; fill: #0f172a; }
-      .desc  { font-size: 11.5px; fill: #475569; }
-      .tag   { font-size: 11px; fill: #ffffff; font-weight: 600; }
-      .tag-core { fill: #2563eb; }
-      .tag-drv  { fill: #10b981; }
-      .tag-data { fill: #f59e0b; }
+      .name-s{ font-size: 12.5px; font-weight: 600; fill: #0f172a; }
+      .desc  { font-size: 11px; fill: #475569; }
+      .desc-s{ font-size: 10.5px; fill: #64748b; }
       .lbl   { font-size: 12px; fill: #64748b; font-weight: 600; }
+      .ctag  { font-size: 10.5px; font-weight: 700; }
+      .mem   { fill: #10b981; }
+      .http  { fill: #2563eb; }
+      .db    { fill: #d97706; }
+      .tcp   { fill: #8b5cf6; }
+      .null  { fill: #64748b; }
+      .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     </style>
   </defs>
 
   <text x="550" y="42" text-anchor="middle" class="title">Arquitectura de rust-scout</text>
-  <text x="550" y="66" text-anchor="middle" class="sub">Abstracción de búsqueda de texto completo estilo Scout — motores intercambiables, contrato unificado</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">Abstracción de búsqueda estilo Scout — un trait Engine, ocho drivers, sin acoplarte al backend</text>
 
-  <!-- 应用层 -->
+  <!-- ==================== Capa de aplicación ==================== -->
   <rect x="40" y="95" width="1020" height="70" rx="10" class="layer"/>
-  <text x="60" y="118" class="lbl">Código de la aplicación (Application)</text>
+  <text x="60" y="118" class="lbl">Capa de aplicación</text>
   <rect x="60" y="126" width="470" height="26" rx="6" class="box"/>
-  <text x="295" y="143" text-anchor="middle" class="name">Código llamante (async / await)</text>
+  <text x="295" y="143" text-anchor="middle" class="name">Código invocador (async / await)</text>
   <rect x="560" y="126" width="480" height="26" rx="6" class="box"/>
-  <text x="800" y="143" text-anchor="middle" class="name">Tus modelos de negocio implementan Searchable / SearchableStore</text>
+  <text x="800" y="143" text-anchor="middle" class="name">Modelos implementan Searchable / SearchableStore</text>
 
-  <!-- 数据契约层 -->
-  <rect x="40" y="195" width="1020" height="70" rx="10" class="layer"/>
-  <text x="60" y="218" class="lbl">Contrato de datos (serde JSON)</text>
-  <rect x="60" y="226" width="300" height="26" rx="6" class="box"/>
-  <text x="210" y="243" text-anchor="middle" class="name">SearchBuilder (consulta encadenada)</text>
-  <rect x="390" y="226" width="300" height="26" rx="6" class="box"/>
-  <text x="540" y="243" text-anchor="middle" class="name">SearchDocument (escritura)</text>
-  <rect x="720" y="226" width="300" height="26" rx="6" class="box"/>
-  <text x="870" y="243" text-anchor="middle" class="name">SearchResult / SearchHit (lectura)</text>
+  <!-- ==================== Capa de contrato de datos ==================== -->
+  <rect x="40" y="185" width="1020" height="70" rx="10" class="layer"/>
+  <text x="60" y="208" class="lbl">Contrato de datos (serde JSON) — agnóstico de driver</text>
+  <rect x="60" y="216" width="300" height="26" rx="6" class="box"/>
+  <text x="210" y="233" text-anchor="middle" class="name">SearchBuilder (encadenado)</text>
+  <rect x="390" y="216" width="300" height="26" rx="6" class="box"/>
+  <text x="540" y="233" text-anchor="middle" class="name">SearchDocument (escritura)</text>
+  <rect x="720" y="216" width="300" height="26" rx="6" class="box"/>
+  <text x="870" y="233" text-anchor="middle" class="name">SearchResult / SearchHit (lectura)</text>
 
-  <!-- 核心层 -->
-  <rect x="40" y="295" width="1020" height="150" rx="10" class="layer"/>
-  <text x="60" y="318" class="lbl">Núcleo (Core)</text>
-  <rect x="60" y="326" width="300" height="100" rx="8" class="box box-core"/>
-  <text x="210" y="352" text-anchor="middle" class="name">EngineManager</text>
-  <text x="210" y="372" text-anchor="middle" class="desc">Fachada: distribuye según ScoutConfig.driver</text>
-  <text x="210" y="390" text-anchor="middle" class="desc">collection (predeterminado) / elasticsearch</text>
-  <text x="210" y="408" text-anchor="middle" class="desc">/ opensearch</text>
-  <rect x="390" y="326" width="650" height="100" rx="8" class="box box-core"/>
-  <text x="715" y="352" text-anchor="middle" class="name">Engine trait — interfaz unificada de motores</text>
-  <text x="715" y="376" text-anchor="middle" class="desc">update · delete · search · paginate · map_ids</text>
-  <text x="715" y="394" text-anchor="middle" class="desc">flush · create_index · delete_index</text>
-  <text x="715" y="412" text-anchor="middle" class="desc">async devuelve EngineFuture&lt;T&gt;, Send + Sync</text>
+  <!-- ==================== Capa núcleo ==================== -->
+  <rect x="40" y="275" width="1020" height="150" rx="10" class="layer"/>
+  <text x="60" y="298" class="lbl">Capa núcleo</text>
+  <rect x="60" y="306" width="300" height="104" rx="8" class="box box-core"/>
+  <text x="210" y="330" text-anchor="middle" class="name">EngineManager (fachada)</text>
+  <text x="210" y="350" text-anchor="middle" class="desc">Despacha y cachea por ScoutConfig.driver</text>
+  <text x="210" y="368" text-anchor="middle" class="desc">Solo construye una vez (con Mutex)</text>
+  <text x="210" y="390" text-anchor="middle" class="desc mono">engine() -&gt; Arc&lt;dyn Engine&gt;</text>
 
-  <line x1="210" y1="326" x2="210" y2="295" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="360" y1="376" x2="390" y2="376" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="390" y="306" width="650" height="104" rx="8" class="box box-core"/>
+  <text x="715" y="330" text-anchor="middle" class="name">trait Engine — la única costura</text>
+  <text x="715" y="350" text-anchor="middle" class="desc">8 obligatorios: update · delete · search · paginate · map_ids · flush · create_index · delete_index</text>
+  <text x="715" y="368" text-anchor="middle" class="desc">5 con default: delete_in · update_bulk · delete_bulk · soft_delete · reindex</text>
+  <text x="715" y="390" text-anchor="middle" class="desc mono">async vía EngineFuture&lt;T&gt;, Send + Sync</text>
 
-  <!-- 驱动层 -->
-  <rect x="40" y="475" width="1020" height="70" rx="10" class="layer"/>
-  <text x="60" y="498" class="lbl">Capa de motores (Drivers)</text>
-  <rect x="60" y="506" width="470" height="26" rx="6" class="box box-drv"/>
-  <text x="110" y="523" class="tag tag-drv">Predeterminado · sin dependencias</text>
-  <text x="250" y="523" class="name">CollectionEngine (HashMap en memoria)</text>
-  <rect x="560" y="506" width="480" height="26" rx="6" class="box box-drv"/>
-  <text x="610" y="523" class="tag tag-drv">feature: elasticsearch</text>
-  <text x="770" y="523" class="name">ElasticsearchEngine (ES / OpenSearch)</text>
-  <line x1="715" y1="426" x2="715" y2="475" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="210" y1="306" x2="210" y2="275" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="360" y1="358" x2="390" y2="358" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="715" y1="410" x2="715" y2="440" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
 
-  <!-- 存储层 -->
-  <rect x="40" y="575" width="1020" height="65" rx="10" class="layer"/>
-  <text x="60" y="598" class="lbl">Almacenamiento (Storage)</text>
-  <rect x="60" y="606" width="470" height="26" rx="6" class="box box-data"/>
-  <text x="295" y="623" text-anchor="middle" class="name">HashMap&lt;index, docs&gt; en el proceso</text>
-  <rect x="560" y="606" width="480" height="26" rx="6" class="box box-data"/>
-  <text x="800" y="623" text-anchor="middle" class="name">Clúster Elasticsearch / OpenSearch (REST + JSON)</text>
-  <line x1="295" y1="532" x2="295" y2="575" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="800" y1="532" x2="800" y2="575" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- ==================== Capa de drivers (cuatro grupos por transporte) ==================== -->
+  <rect x="40" y="440" width="1020" height="210" rx="10" class="layer"/>
+  <text x="60" y="462" class="lbl">Capa de drivers — agrupados por transporte, tras feature</text>
+
+  <!-- Grupo A: en proceso -->
+  <text x="60" y="484" class="ctag mem">A · En proceso (defecto, sin deps)</text>
+  <rect x="60" y="492" width="230" height="150" rx="8" class="box box-mem"/>
+  <text x="76" y="516" class="name">CollectionEngine</text>
+  <text x="76" y="538" class="desc">HashMap&lt;index, docs&gt;</text>
+  <text x="76" y="556" class="desc">subcadenas serializadas</text>
+  <text x="76" y="574" class="desc">matches() / sort_hits() en memoria</text>
+  <text x="76" y="592" class="desc">flush no-op; escritura visible</text>
+  <text x="76" y="616" class="desc-s mono">ScoutConfig::collection()</text>
+  <text x="76" y="634" class="desc-s">feature: integrado</text>
+
+  <!-- Grupo B: HTTP REST -->
+  <text x="310" y="484" class="ctag http">B · HTTP REST (reqwest)</text>
+  <rect x="310" y="492" width="230" height="33" rx="7" class="box box-http"/>
+  <text x="324" y="513" class="name-s">ElasticsearchEngine</text>
+  <text x="528" y="513" text-anchor="end" class="desc-s">ES / OS</text>
+  <rect x="310" y="531" width="230" height="33" rx="7" class="box box-http"/>
+  <text x="324" y="552" class="name-s">MeilisearchEngine</text>
+  <text x="528" y="552" text-anchor="end" class="desc-s">:7700</text>
+  <rect x="310" y="570" width="230" height="33" rx="7" class="box box-http"/>
+  <text x="324" y="591" class="name-s">TypesenseEngine</text>
+  <text x="528" y="591" text-anchor="end" class="desc-s">:8108</text>
+  <rect x="310" y="609" width="230" height="33" rx="7" class="box box-http"/>
+  <text x="324" y="630" class="name-s">AlgoliaEngine</text>
+  <text x="528" y="630" text-anchor="end" class="desc-s">nube gestionada</text>
+
+  <!-- Grupo C: archivo local -->
+  <text x="560" y="484" class="ctag db">C · Archivo local</text>
+  <rect x="560" y="492" width="230" height="150" rx="8" class="box box-db"/>
+  <text x="576" y="516" class="name">DatabaseEngine</text>
+  <text x="576" y="538" class="desc">tabla SQLite scout_documents</text>
+  <text x="576" y="556" class="desc">prefiltro LIKE + refinado en RAM</text>
+  <text x="576" y="574" class="desc">total = recuento SQL</text>
+  <text x="576" y="592" class="desc">paginación según hits</text>
+  <text x="576" y="616" class="desc-s mono">ScoutConfig::database(..)</text>
+  <text x="576" y="634" class="desc-s">feature: database</text>
+
+  <!-- Grupo D: TCP nativo / driver nulo -->
+  <text x="810" y="484" class="ctag tcp">D · TCP nativo / nulo</text>
+  <rect x="810" y="492" width="230" height="72" rx="8" class="box box-tcp"/>
+  <text x="826" y="516" class="name">XunSearchEngine</text>
+  <text x="826" y="536" class="desc">protocolo binario xunsearchd</text>
+  <text x="826" y="553" class="desc">una conexión corta por op</text>
+  <rect x="810" y="572" width="230" height="70" rx="8" class="box box-null"/>
+  <text x="826" y="596" class="name">NullEngine</text>
+  <text x="826" y="616" class="desc">descarta escrituras, siempre vacío</text>
+  <text x="826" y="633" class="desc">pruebas / desactivar búsqueda</text>
+
+  <!-- ==================== Capa de almacenamiento ==================== -->
+  <rect x="40" y="672" width="1020" height="140" rx="10" class="layer"/>
+  <text x="60" y="694" class="lbl">Almacenamiento / Transporte</text>
+
+  <rect x="60" y="706" width="230" height="88" rx="8" class="box box-data"/>
+  <text x="175" y="732" text-anchor="middle" class="name">En proceso</text>
+  <text x="175" y="754" text-anchor="middle" class="desc">HashMap&lt;index, Vec&lt;doc&gt;&gt;</text>
+  <text x="175" y="772" text-anchor="middle" class="desc">Mutex; se pierde al salir</text>
+
+  <rect x="310" y="706" width="230" height="88" rx="8" class="box box-data"/>
+  <text x="425" y="732" text-anchor="middle" class="name">Clúster de búsqueda</text>
+  <text x="425" y="754" text-anchor="middle" class="desc">ES / OpenSearch · Meilisearch</text>
+  <text x="425" y="772" text-anchor="middle" class="desc">Typesense · Algolia nube</text>
+
+  <rect x="560" y="706" width="230" height="88" rx="8" class="box box-data"/>
+  <text x="675" y="732" text-anchor="middle" class="name">Archivo SQLite</text>
+  <text x="675" y="754" text-anchor="middle" class="desc">.db local, junto a tu BD</text>
+  <text x="675" y="772" text-anchor="middle" class="desc">sqlx + runtime-tokio</text>
+
+  <rect x="810" y="706" width="230" height="88" rx="8" class="box box-data"/>
+  <text x="925" y="732" text-anchor="middle" class="name">proceso xunsearchd</text>
+  <text x="925" y="754" text-anchor="middle" class="desc">8383 índice / 8384 búsqueda</text>
+  <text x="925" y="772" text-anchor="middle" class="desc">NullEngine: sin almacenamiento</text>
+
+  <!-- conectores grupo -> almacenamiento -->
+  <line x1="175" y1="642" x2="175" y2="706" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="425" y1="642" x2="425" y2="706" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="675" y1="642" x2="675" y2="706" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="925" y1="642" x2="925" y2="706" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- aplicación -> contrato -->
+  <line x1="295" y1="152" x2="295" y2="185" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
 </svg>

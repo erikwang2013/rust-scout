@@ -40,9 +40,6 @@ impl Engine for NullEngine {
         Box::pin(async move { Ok(SearchResult::default()) })
     }
 
-    fn map_ids(&self, _result: &SearchResult) -> Vec<String> {
-        Vec::new()
-    }
 
     fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move { Ok(()) })

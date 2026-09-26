@@ -8,9 +8,14 @@
 
 **rust-scout 全文字搜索库抽象** —— 面向 Rust 的轻量全文搜索接口层。借鉴
 [Laravel Scout](https://laravel.com/docs/scout) 的链式查询心智，通过统一的
-`Engine` trait 抽象内存、Elasticsearch/OpenSearch、Meilisearch、Typesense、
-Algolia、SQLite 等多类后端：**开发用零依赖内存驱动，生产无缝切换任意后端，
-业务代码一行不改。**
+`Engine` trait 抽象 **8 种后端**（内存、Elasticsearch/OpenSearch、Meilisearch、
+Typesense、Algolia、SQLite、XunSearch、Null）：**开发用零依赖内存驱动，
+生产无缝切换任意后端，业务代码一行不改。**
+
+![项目宠物：嗅探猎犬 Scout](docs/svg/pet.svg)
+
+> 项目宠物 **嗅探猎犬 Scout**（Search Hound）—— 嗅探文档，追踪索引。
+> 它不只在文档里：终端横幅和错误提示里都有它，见 [项目宠物](#项目宠物)。
 
 ```rust
 let result = engine.search(
@@ -26,23 +31,32 @@ let result = engine.search(
 
 | 能力 | 说明 |
 |------|------|
-| 🔍 全文搜索 | 内存驱动子串匹配；ES 驱动 `query_string` 语法（`字段:值`） |
-| ⚙️ 链式查询 | `SearchBuilder`：query / within / where_field / where_in / where_not_in / order_by / take / skip |
+| 🔍 全文搜索 | 内存驱动子串匹配；HTTP 驱动走后端原生语法（ES 为 `query_string`，`字段:值`） |
+| ⚙️ 链式查询 | `SearchBuilder`：query / within / where_field / where_in / where_not_in / order_by / take / skip / option |
 | 🎯 精确过滤 | 等值匹配（ES → `term`）、集合匹配（ES → `terms` / `must_not`） |
-| 📄 多字段排序 | 可叠加 asc / desc |
+| 📄 多字段排序 | 可叠加 asc / desc，跨 JSON 类型比较有确定顺序 |
 | 📃 分页 | `take`/`skip` 偏移截取 + `paginate(page, per_page)` 页码分页 |
 | 🗂️ 多索引 | 文档级 `index` 字段路由，默认索引 `"default"` |
-| 🔄 索引生命周期 | `create_index` / `flush` / `delete_index` 全流程 |
-| 🔌 可插拔驱动 | 默认内存零依赖；`elasticsearch` / `meilisearch` / `typesense` / `algolia` / `database` / `null` feature 按需启用；`xunsearch` 为占位 stub |
+| 🔄 索引生命周期 | `create_index` / `flush` / `reindex` / `delete_index` 全流程 |
+| 🗑️ 软删除 | `soft_delete` 打 `__soft_deleted` 标记，`with_trashed()` / `only_trashed()` 三态过滤 |
+| 📦 批量操作 | `update_bulk` / `delete_bulk` 减少往返；`delete_in` 精确到指定索引删除 |
+| 🔌 可插拔驱动 | 默认内存零依赖；8 种后端各自 feature 门控，按需引入不用的不编译 |
 | 🔒 安全边界 | 索引名校验（`validate_index_name`）+ RFC 3986 百分号编码，杜绝路径注入 |
+| 🐕 项目宠物 | 嗅探猎犬 Scout：终端横幅 + 逐错误的排查提示（`rust_scout::pet`） |
 
-## 架构
+## 架构设计
 
 ![架构](docs/svg/architecture.svg)
 
-## 功能总览
+五层结构：应用层 → 数据契约层（serde JSON）→ 核心层（`EngineManager` + `Engine` trait）
+→ 驱动层（按传输方式分四组，共 8 个驱动）→ 存储层。跨层的只有 `Engine` trait 一个接缝。
+
+## 功能设计
 
 ![功能](docs/svg/features.svg)
+
+12 项能力：链式查询、全文、精确/集合过滤、排序、分页、多索引、软删除、
+索引生命周期、批量与精确删除、可插拔驱动、安全边界。
 
 ## 设计思路
 
@@ -52,29 +66,54 @@ let result = engine.search(
 
 ![生命周期](docs/svg/lifecycle.svg)
 
+七个阶段：创建 → 写入 → 刷新 → 查询 → 删除文档 → 重建 → 销毁。图下半部分是
+四类驱动在各阶段的行为差异对照。
+
 ## 项目结构
 
 ```
 rust-scout/
-├── Cargo.toml            # 依赖与 feature 声明（elasticsearch 可选）
+├── Cargo.toml              # 依赖与 feature 声明（默认 default = []，零依赖）
 ├── src/
-│   ├── lib.rs            # crate 根：模块导出 + 公开类型再导出
-│   ├── engine.rs         # Engine trait：驱动统一接口（8 个操作）
-│   ├── manager.rs        # EngineManager：门面，按配置分发驱动
-│   ├── config.rs         # ScoutConfig + validate_index_name
-│   ├── builder.rs        # SearchBuilder：链式查询构建与匹配/排序逻辑
-│   ├── document.rs       # SearchDocument：写入文档（serde JSON 契约）
-│   ├── result.rs         # SearchResult / SearchHit：查询结果
-│   ├── searchable.rs     # Searchable / SearchableStore：业务模型桥接
-│   ├── error.rs          # ScoutError + Result<T>
-│   ├── collection_engine.rs  # 内存驱动（默认）
-│   └── elasticsearch_engine.rs # ES/OpenSearch 驱动（feature 可选）
-├── tests/                # 集成测试（当前为空）
-├── examples/             # 示例（当前为空）
+│   ├── lib.rs              # crate 根：模块导出 + feature 门控的公开类型再导出
+│   │
+│   ├── engine.rs           # Engine trait：唯一的驱动契约（8 必需 + 5 默认实现）
+│   ├── manager.rs          # EngineManager：门面，按 driver 分发并缓存 Arc<dyn Engine>
+│   ├── config.rs           # ScoutConfig（8 个构造器）+ validate_index_name + percent_encode
+│   │
+│   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter：链式查询
+│   ├── document.rs         # SearchDocument：写入文档（serde JSON 契约）
+│   ├── result.rs           # SearchResult / SearchHit：查询结果
+│   ├── searchable.rs       # Searchable / SearchableStore：业务模型桥接
+│   ├── error.rs            # ScoutError + Result<T> + pet_hint()
+│   ├── pet.rs              # 项目宠物：嗅探猎犬 Scout（横幅 + 错误提示）
+│   │
+│   ├── collection_engine.rs    # 内存驱动（默认，零依赖）
+│   ├── null_engine.rs          # 空驱动：丢弃写入、永远空结果        [null]
+│   ├── elasticsearch_engine.rs # ES / OpenSearch（REST）            [elasticsearch]
+│   │   └── query.rs            #   query_string 构造与响应解析
+│   ├── meilisearch_engine.rs   # Meilisearch（REST）                [meilisearch]
+│   ├── typesense_engine.rs     # Typesense（REST）                  [typesense]
+│   │   └── typesense_query.rs  #   搜索参数与 filter_by 构造
+│   ├── algolia_engine.rs       # Algolia（托管云 REST）              [algolia]
+│   ├── database_engine.rs      # SQLite（sqlx，LIKE 粗筛 + 内存精筛） [database]
+│   ├── xunsearch_engine.rs     # XunSearch：xunsearchd 原生 TCP 协议  [xunsearch]
+│   │   ├── xunsearch_query.rs  #   封包编解码 + ini 字段方案
+│   │   └── xunsearch_tests.rs  #   带 mock server 的端到端测试
+│   │
+│   └── (单元测试内联在各模块底部 #[cfg(test)] mod tests)
+├── tests/                  # 集成测试（当前为空，测试内联在 src）
+├── examples/
+│   └── pet.rs              # cargo run --example pet：宠物横幅 + 错误提示演示
 └── docs/
-    ├── svg/              # 本 README 引用的架构/功能/设计/生命周期图
-    └── superpowers/specs/ # 设计文档
+    ├── svg/                # 项目宠物 + 架构 / 功能 / 设计 / 生命周期图
+    ├── i18n/               # 12 种语言的 README 与对应 SVG
+    ├── coin/               # 打赏二维码
+    └── superpowers/specs/  # 设计文档
 ```
+
+> `[feature]` 标注的是该驱动所需的 Cargo feature；未启用时
+> `EngineManager` 会返回 `ScoutError::Unsupported`，而不是静默降级。
 
 ## 快速开始
 
@@ -82,7 +121,7 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.1"
+rust-scout = "0.4"
 tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
 ```
 
@@ -143,11 +182,14 @@ let builder = SearchBuilder::new("全文关键词")   // 全文搜索（可选�
     .order_by("created_at", true)                // 多字段排序（true = desc）
     .order_by("title", false)
     .take(20)                                    // 每页条数
-    .skip(40);                                   // 偏移
+    .skip(40)                                    // 偏移
+    .option("highlight", true)                   // 驱动相关的透传选项
+    .with_trashed();                             // 软删除三态：默认排除 / 带上 / 只看
 ```
 
 > `query` 支持 Lucene `query_string` 语法（在 ES 驱动下完整生效）：
-> `"rust"`、`"title:rust AND tags:async"`、`"rust~2"`（模糊）。内存驱动按子串匹配处理。
+> `"rust"`、`"title:rust AND tags:async"`、`"rust~2"`（模糊）。其余驱动按各自
+> 原生语法或子串匹配处理。
 
 ### 分页
 
@@ -161,12 +203,19 @@ let page2 = engine.paginate(&SearchBuilder::new("rust").within("books"), 2, 10).
 ### 多索引与生命周期
 
 ```rust
-engine.create_index("books", serde_json::json!({})).await?;   // 建索引
-engine.update(&docs).await?;                                  // 写文档
-engine.flush("books").await?;                                 // 刷新可见性
-engine.delete(&["book-1".to_string()]).await?;                // 删文档
-engine.delete_index("books").await?;                          // 删索引
+engine.create_index("books", serde_json::json!({})).await?;    // 建索引
+engine.update(&docs).await?;                                   // 写文档
+engine.update_bulk(&docs).await?;                              // 批量写（后端支持则走 bulk 接口）
+engine.flush("books").await?;                                  // 刷新可见性
+engine.search(&builder).await?;                                // 查询
+engine.delete_in("books", &["book-1".to_string()]).await?;     // 精确到索引删文档
+engine.soft_delete(&["book-2".to_string()]).await?;            // 软删除（打标记）
+engine.reindex("books", "books_v2").await?;                    // 重建索引
+engine.delete_index("books").await?;                           // 删索引
 ```
+
+> `delete` 不带索引信息，语义因引擎而异（内存驱动跨索引删，ES 只看 `default`
+> 索引）。要精确到某个索引请用 `delete_in`。
 
 ### 切换到 Elasticsearch / OpenSearch
 
@@ -214,16 +263,16 @@ let engine = EngineManager::new(config).engine()?;
 
 ### 引擎对照
 
-| 引擎 | driver | feature | 状态 |
-|------|--------|---------|------|
-| 内存（默认） | `collection` | 内置 | 完整 |
-| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | 完整 |
-| Meilisearch | `meilisearch` | `meilisearch` | 完整 |
-| Typesense | `typesense` | `typesense` | 完整 |
-| Algolia | `algolia` | `algolia` | 完整 |
-| SQLite | `database` | `database` | 完整 |
-| Null（测试/禁用搜索） | `null` | `null` | 完整 |
-| XunSearch | `xunsearch` | `xunsearch` | stub（待实现） |
+| 引擎 | driver | feature | 传输 | 状态 |
+|------|--------|---------|------|------|
+| 内存（默认） | `collection` | 内置 | 进程内 | 完整 |
+| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | HTTP REST | 完整 |
+| Meilisearch | `meilisearch` | `meilisearch` | HTTP REST | 完整 |
+| Typesense | `typesense` | `typesense` | HTTP REST | 完整 |
+| Algolia | `algolia` | `algolia` | HTTP REST | 完整 |
+| SQLite | `database` | `database` | 本地文件 | 完整 |
+| XunSearch | `xunsearch` | `xunsearch` | 原生 TCP | 完整 |
+| Null（测试/禁用搜索） | `null` | `null` | — | 完整 |
 
 其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
@@ -240,11 +289,18 @@ let engine = EngineManager::new(config).engine()?;
 
 所有操作返回 `crate::Result<T>`，错误收敛为统一 `ScoutError`：
 
-- `InvalidIndexName` —— 索引名含空白 / `/` / 以 `.` 开头等（写入前校验）
-- `InvalidResult` —— 文档字段非 JSON 对象
-- `Unsupported` —— feature 未启用等
-- `Json` —— serde 错误
-- `Http` / `Backend` —— ES 驱动网络与后端错误（feature 启用时）
+| 变体 | 触发场景 | feature |
+|------|----------|---------|
+| `InvalidIndexName` | 索引名含空白 / `/` / `\`，或以 `.` 开头，或为空（写入前校验） | 内置 |
+| `InvalidResult` | 文档字段不是 JSON 对象 | 内置 |
+| `Unsupported` | 驱动所需 feature 未启用、缺少必需配置、引擎不支持该操作 | 内置 |
+| `Json` | serde 序列化 / 反序列化错误 | 内置 |
+| `Http` | HTTP 请求失败（连接、超时、状态码） | HTTP 四引擎 |
+| `Sqlx` | SQLite 错误 | `database` |
+| `Backend` | 后端返回了错误响应，原始信息透传 | HTTP 四引擎 / `xunsearch` |
+| `XunSearch` / `XunSearchIo` | 协议解析失败 / TCP I/O 失败 | `xunsearch` |
+
+每个变体都带一条排查提示，见 [`ScoutError::pet_hint()`](#项目宠物)。
 
 ### 桥接业务模型（Searchable）
 
@@ -263,6 +319,69 @@ impl Searchable for Article {
     }
 }
 ```
+
+## 项目宠物
+
+![项目宠物：嗅探猎犬 Scout](docs/svg/pet.svg)
+
+**Scout · 嗅探猎犬**（Search Hound）—— 嗅探文档，追踪索引，哪里有查询，哪里就有它。
+图形版见 [`docs/svg/pet.svg`](docs/svg/pet.svg)；终端里长这样：
+
+```console
+$ cargo run --example pet
+```
+
+```
+
+      ___              ___
+     /   \            /   \
+    |     |__________|     |
+    |     /          \     |
+    |    |   o    o   |    |
+    |    |     __     |    |
+    |     \   /  \   /     |
+     \     \  \__/  /     /
+      \     \________/    /
+       \_________________/
+         \   ~~~~~~   /
+          \__________/
+             |    |
+            _|    |_
+           |__|  |__|
+
+
+   ,^.     ,^.     ,^.     ,^.
+
+  Scout · 嗅探猎犬 · rust-scout
+  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+```
+
+宠物住在 [`rust_scout::pet`](src/pet.rs) 模块里，**不引入任何依赖**：
+
+| 项 | 说明 |
+|----|------|
+| `pet::NAME` / `pet::SPECIES` / `pet::TAGLINE` | 名牌信息 |
+| `pet::ART` | ASCII 形象（刻意只用 7 位 ASCII，CJK 终端里不会歪） |
+| `pet::banner()` | 终端横幅，纯文本无转义序列，可安全写进日志 |
+| `pet::hint(&err)` | 逐错误的排查提示，返回 `&'static str` |
+| `pet::format_error(&err)` | 原始错误 + 提示，渲染成给人看的样子 |
+| `ScoutError::pet_hint()` | 同上提示，直接挂在错误类型上 |
+
+```rust
+use rust_scout::{pet, ScoutError};
+
+println!("{}", pet::banner());
+
+let err = ScoutError::Unsupported("缺少 feature".into());
+eprintln!("{}", pet::format_error(&err));
+// error: unsupported operation: 缺少 feature
+//
+//   [o_o] Scout：这个后端我还没找到路 —— Cargo.toml 里对应的 feature 启用了吗？
+```
+
+> **为什么错误提示不直接塞进 `Display`？** `ScoutError` 的 `Display` 保持单行、
+> 机器可读 —— `?` 传播、日志采集、CI 里 grep 错误串都依赖它。要带宠物提示的
+> 人类可读输出，走 `pet::format_error()`。
 
 ## 支持与打赏
 

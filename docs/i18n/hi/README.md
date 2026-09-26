@@ -4,9 +4,15 @@
 [![docs.rs](https://img.shields.io/docsrs/rust-scout)](https://docs.rs/rust-scout)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../../LICENSE)
 
-[简体中文](../../../README.md) · [English](../en/README.md) · [日本語](../ja/README.md) · [한국어](../ko/README.md) · [Русский](../ru/README.md) · [Deutsch](../de/README.md) · [Français](../fr/README.md) · [Español](../es/README.md) · [Português](../pt/README.md) · हिन्दी · [العربية](../ar/README.md) · [বাংলা](../bn/README.md) · [Bahasa Indonesia](../id/README.md)
+[简体中文](../../../README.md) · [English](../en/README.md) · [日本語](../ja/README.md) · [한국어](../ko/README.md) · [Bahasa Indonesia](../id/README.md) · [Русский](../ru/README.md) · [Deutsch](../de/README.md) · [Français](../fr/README.md) · [Español](../es/README.md) · [Português](../pt/README.md) · हिन्दी · [العربية](../ar/README.md) · [বাংলা](../bn/README.md)
 
-**rust-scout — पूर्ण-पाठ खोज लाइब्रेरी एब्स्ट्रैक्शन** — Rust के लिए हल्की पूर्ण-पाठ खोज (full-text search) इंटरफ़ेस परत। [Laravel Scout](https://laravel.com/docs/scout) की चेन-आधारित क्वेरी शैली से प्रेरित, यह एकीकृत `Engine` ट्रेट के माध्यम से मेमोरी, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite आदि कई बैकएंड्स को एब्स्ट्रैक्ट करता है: **डेवलपमेंट में शून्य-निर्भरता वाला इन-मेमोरी ड्राइवर, प्रोडक्शन में बिना एक पंक्ति बदले किसी भी बैकएंड पर स्विच करें।**
+**rust-scout — पूर्ण-पाठ खोज लाइब्रेरी एब्स्ट्रैक्शन** — Rust के लिए एक हल्की पूर्ण-पाठ खोज (full-text search) इंटरफ़ेस परत। [Laravel Scout](https://laravel.com/docs/scout) की चेन-आधारित क्वेरी शैली से प्रेरित, यह एकीकृत `Engine` trait के माध्यम से **8 बैकएंड** (इन-मेमोरी, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite, XunSearch, Null) को एब्स्ट्रैक्ट करता है: **डेवलपमेंट के लिए शून्य-निर्भरता वाला इन-मेमोरी ड्राइवर, प्रोडक्शन में बिना एक भी पंक्ति बदले किसी भी बैकएंड पर सहज स्विच।**
+
+![प्रोजेक्ट पेट: सर्च हाउंड Scout](svg/pet.svg)
+
+> प्रोजेक्ट पेट **सर्च हाउंड Scout** — दस्तावेज़ों को सूंघता है, इंडेक्स का पीछा करता है।
+> यह केवल दस्तावेज़ों में ही नहीं: टर्मिनल बैनर और त्रुटि संकेतों में भी मौजूद है,
+> देखें [प्रोजेक्ट पेट](#प्रोजेक्ट-पेट)।
 
 ```rust
 let result = engine.search(
@@ -18,27 +24,36 @@ let result = engine.search(
 ).await?;
 ```
 
-## सुविधाएँ
+## विशेषताएँ
 
 | क्षमता | विवरण |
 |------|------|
-| 🔍 पूर्ण-पाठ खोज | इन-मेमोरी ड्राइवर में सबस्ट्रिंग मिलान; ES ड्राइवर में `query_string` सिंटैक्स (`फ़ील्ड:मान`) |
-| ⚙️ चेन-आधारित क्वेरी | `SearchBuilder`: query / within / where_field / where_in / where_not_in / order_by / take / skip |
+| 🔍 पूर्ण-पाठ खोज | इन-मेमोरी ड्राइवर सबस्ट्रिंग मिलान; HTTP ड्राइवर बैकएंड का मूल सिंटैक्स (ES के लिए `query_string`, `फ़ील्ड:मान`) |
+| ⚙️ चेन-आधारित क्वेरी | `SearchBuilder`: query / within / where_field / where_in / where_not_in / order_by / take / skip / option |
 | 🎯 सटीक फ़िल्टरिंग | समानता मिलान (ES → `term`), सेट मिलान (ES → `terms` / `must_not`) |
-| 📄 बहु-फ़ील्ड सॉर्टिंग | asc / desc को जोड़ा जा सकता है |
-| 📃 पेजिनेशन | `take`/`skip` ऑफ़सेट कट + `paginate(page, per_page)` पेज-आधारित |
+| 📄 बहु-फ़ील्ड सॉर्टिंग | asc / desc जोड़े जा सकते हैं, JSON टाइपों के बीच क्रम निश्चित |
+| 📃 पेजिनेशन | `take`/`skip` ऑफ़सेट कटौती + `paginate(page, per_page)` पेज-आधारित पेजिनेशन |
 | 🗂️ बहु-इंडेक्स | दस्तावेज़-स्तरीय `index` फ़ील्ड रूटिंग, डिफ़ॉल्ट इंडेक्स `"default"` |
-| 🔄 इंडेक्स जीवनचक्र | `create_index` / `flush` / `delete_index` पूरी प्रक्रिया |
-| 🔌 प्लगेबल ड्राइवर | डिफ़ॉल्ट इन-मेमोरी, शून्य निर्भरता; `elasticsearch` / `meilisearch` / `typesense` / `algolia` / `database` / `null` features आवश्यकता अनुसार सक्षम; `xunsearch` एक प्लेसहोल्डर स्टब है |
-| 🔒 सुरक्षा सीमाएँ | इंडेक्स नाम सत्यापन (`validate_index_name`) + RFC 3986 प्रतिशत-एन्कोडिंग, पाथ इंजेक्शन को रोकना |
+| 🔄 इंडेक्स जीवनचक्र | `create_index` / `flush` / `reindex` / `delete_index` पूरा वर्कफ़्लो |
+| 🗑️ सॉफ़्ट डिलीट | `soft_delete` द्वारा `__soft_deleted` चिह्न; `with_trashed()` / `only_trashed()` तीन-अवस्था फ़िल्टरिंग |
+| 📦 बल्क ऑपरेशन | `update_bulk` / `delete_bulk` से राउंड-ट्रिप कम; `delete_in` किसी एक इंडेक्स पर सटीक |
+| 🔌 प्लग करने योग्य ड्राइवर | डिफ़ॉल्ट शून्य-निर्भरता; 8 बैकएंड, हर एक अपने feature द्वारा गेटेड — जो उपयोग नहीं होता वह कंपाइल नहीं होता |
+| 🔒 सुरक्षा सीमा | इंडेक्स नाम सत्यापन (`validate_index_name`) + RFC 3986 प्रतिशत-एन्कोडिंग, पाथ इंजेक्शन रोकने के लिए |
+| 🐕 प्रोजेक्ट पेट | सर्च हाउंड Scout: टर्मिनल बैनर + हर त्रुटि के लिए निदान संकेत (`rust_scout::pet`) |
 
-## वास्तुकला
+## वास्तुकला डिज़ाइन
 
 ![वास्तुकला](svg/architecture.svg)
 
-## सुविधाओं का अवलोकन
+पाँच परतें: एप्लिकेशन → डेटा कॉन्ट्रैक्ट (serde JSON) → कोर (`EngineManager` + `Engine` trait)
+→ ड्राइवर (ट्रांसपोर्ट के अनुसार चार समूह, कुल 8) → स्टोरेज। परतों को पार करने वाला एकमात्र सीम `Engine` trait है।
+
+## सुविधा डिज़ाइन
 
 ![सुविधाएँ](svg/features.svg)
+
+12 क्षमताएँ: चेन-आधारित क्वेरी, पूर्ण-पाठ, सटीक/सेट फ़िल्टरिंग, सॉर्टिंग, पेजिनेशन, बहु-इंडेक्स,
+सॉफ़्ट डिलीट, इंडेक्स जीवनचक्र, बल्क और सटीक हटाना, प्लग करने योग्य ड्राइवर, सुरक्षा सीमा।
 
 ## डिज़ाइन दर्शन
 
@@ -48,29 +63,54 @@ let result = engine.search(
 
 ![जीवनचक्र](svg/lifecycle.svg)
 
+सात चरण: बनाना → लिखना → फ़्लश → क्वेरी → दस्तावेज़ हटाना → पुनर्निर्माण → नष्ट करना।
+आरेख का निचला भाग दर्शाता है कि चारों ड्राइवर परिवार हर चरण में कैसे भिन्न व्यवहार करते हैं।
+
 ## प्रोजेक्ट संरचना
 
 ```
 rust-scout/
-├── Cargo.toml            # 依赖与 feature 声明（elasticsearch 可选）
+├── Cargo.toml              # निर्भरताएँ और feature घोषणाएँ (default = [], शून्य-निर्भरता)
 ├── src/
-│   ├── lib.rs            # crate 根：模块导出 + 公开类型再导出
-│   ├── engine.rs         # Engine trait：驱动统一接口（8 个操作）
-│   ├── manager.rs        # EngineManager：门面，按配置分发驱动
-│   ├── config.rs         # ScoutConfig + validate_index_name
-│   ├── builder.rs        # SearchBuilder：链式查询构建与匹配/排序逻辑
-│   ├── document.rs       # SearchDocument：写入文档（serde JSON 契约）
-│   ├── result.rs         # SearchResult / SearchHit：查询结果
-│   ├── searchable.rs     # Searchable / SearchableStore：业务模型桥接
-│   ├── error.rs          # ScoutError + Result<T>
-│   ├── collection_engine.rs  # 内存驱动（默认）
-│   └── elasticsearch_engine.rs # ES/OpenSearch 驱动（feature 可选）
-├── tests/                # 集成测试（当前为空）
-├── examples/             # 示例（当前为空）
+│   ├── lib.rs              # crate रूट: मॉड्यूल निर्यात + feature-गेटेड सार्वजनिक प्रकार पुनर्निर्यात
+│   │
+│   ├── engine.rs           # Engine trait: एकमात्र ड्राइवर कॉन्ट्रैक्ट (8 अनिवार्य + 5 डिफ़ॉल्ट)
+│   ├── manager.rs          # EngineManager: फ़साड, driver के अनुसार वितरण और Arc<dyn Engine> कैश
+│   ├── config.rs           # ScoutConfig (8 कंस्ट्रक्टर) + validate_index_name + percent_encode
+│   │
+│   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: चेन-आधारित क्वेरी
+│   ├── document.rs         # SearchDocument: लिखा जाने वाला दस्तावेज़ (serde JSON कॉन्ट्रैक्ट)
+│   ├── result.rs           # SearchResult / SearchHit: क्वेरी परिणाम
+│   ├── searchable.rs       # Searchable / SearchableStore: बिज़नेस मॉडल ब्रिज
+│   ├── error.rs            # ScoutError + Result<T> + pet_hint()
+│   ├── pet.rs              # प्रोजेक्ट पेट: सर्च हाउंड Scout (बैनर + त्रुटि संकेत)
+│   │
+│   ├── collection_engine.rs    # इन-मेमोरी ड्राइवर (डिफ़ॉल्ट, शून्य-निर्भरता)
+│   ├── null_engine.rs          # नो-ऑप ड्राइवर: लेखन छोड़ता है, हमेशा खाली        [null]
+│   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                        [elasticsearch]
+│   │   └── query.rs            #   query_string निर्माण और प्रतिक्रिया पार्सिंग
+│   ├── meilisearch_engine.rs   # Meilisearch (REST)                            [meilisearch]
+│   ├── typesense_engine.rs     # Typesense (REST)                              [typesense]
+│   │   └── typesense_query.rs  #   खोज पैरामीटर और filter_by निर्माण
+│   ├── algolia_engine.rs       # Algolia (होस्टेड क्लाउड REST)                  [algolia]
+│   ├── database_engine.rs      # SQLite (sqlx, LIKE रूखा फ़िल्टर + इन-मेमोरी सूक्ष्म) [database]
+│   ├── xunsearch_engine.rs     # XunSearch: xunsearchd मूल TCP प्रोटोकॉल      [xunsearch]
+│   │   ├── xunsearch_query.rs  #   पैकेट कोडेक + ini फ़ील्ड योजना
+│   │   └── xunsearch_tests.rs  #   mock सर्वर के साथ एंड-टू-एंड परीक्षण
+│   │
+│   └── (यूनिट टेस्ट हर मॉड्यूल के अंत में #[cfg(test)] mod tests के अंतर्गत)
+├── tests/                  # इंटीग्रेशन टेस्ट (अभी खाली, टेस्ट src में इनलाइन हैं)
+├── examples/
+│   └── pet.rs              # cargo run --example pet: पेट बैनर + त्रुटि-संकेत डेमो
 └── docs/
-    ├── svg/              # 本 README 引用的架构/功能/设计/生命周期图
-    └── superpowers/specs/ # 设计文档
+    ├── svg/                # पेट + वास्तुकला / सुविधा / डिज़ाइन / जीवनचक्र आरेख
+    ├── i18n/               # 12 भाषाओं के README और उनके SVG
+    ├── coin/               # दान QR कोड
+    └── superpowers/specs/  # डिज़ाइन दस्तावेज़
 ```
+
+> `[feature]` उस Cargo feature को दर्शाता है जो उस ड्राइवर के लिए आवश्यक है। सक्रिय न होने पर
+> `EngineManager` चुपचाप घटने के बजाय `ScoutError::Unsupported` लौटाता है।
 
 ## त्वरित आरंभ
 
@@ -78,8 +118,8 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.1"
-tokio = { version = "1", features = ["macros", "rt"] }   # केवल उदाहरणों के लिए आवश्यक
+rust-scout = "0.3"
+tokio = { version = "1", features = ["macros", "rt"] }   # केवल उदाहरण के लिए
 ```
 
 ### 2. न्यूनतम उदाहरण (डिफ़ॉल्ट इन-मेमोरी ड्राइवर)
@@ -89,7 +129,7 @@ use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocume
 
 #[tokio::main]
 async fn main() -> rust_scout::Result<()> {
-    // डिफ़ॉल्ट ड्राइवर: इन-मेमोरी CollectionEngine, बिना निर्भरता के तुरंत काम करता है
+    // डिफ़ॉल्ट ड्राइवर: इन-मेमोरी CollectionEngine, शून्य निर्भरताएँ
     let engine = EngineManager::new(ScoutConfig::collection()).engine()?;
 
     // दस्तावेज़ लिखें
@@ -105,7 +145,7 @@ async fn main() -> rust_scout::Result<()> {
     book.index = Some("books".to_string());
     engine.update(&[book]).await?;
 
-    // क्वेरी करें
+    // क्वेरी
     let result = engine
         .search(
             SearchBuilder::new("rust")
@@ -128,41 +168,52 @@ async fn main() -> rust_scout::Result<()> {
 
 ### क्वेरी निर्माण (SearchBuilder)
 
-सभी क्वेरी ऑपरेशन चेन में जुड़ते हैं, और अंत में `engine.search(&builder)` को दिए जाते हैं:
+सभी क्वेरी ऑपरेशन चेन में जोड़े जाते हैं और अंत में `engine.search(&builder)` को सौंपे जाते हैं:
 
 ```rust
-let builder = SearchBuilder::new("全文关键词")   // पूर्ण-पाठ खोज (वैकल्पिक; खाली स्ट्रिंग = सब कुछ मिलाएं)
-    .within("articles")                          // इंडेक्स निर्दिष्ट करें (वैकल्पिक; डिफ़ॉल्ट "default")
+let builder = SearchBuilder::new("पूर्ण-पाठ कीवर्ड")   // पूर्ण-पाठ खोज (वैकल्पिक, खाली स्ट्रिंग = सब मिलाएँ)
+    .within("articles")                          // लक्ष्य इंडेक्स (वैकल्पिक, डिफ़ॉल्ट "default")
     .where_field("status", "published")          // समानता फ़िल्टर
     .where_in("tags", ["rust", "async"])         // IN सेट
     .where_not_in("category", ["draft"])         // NOT IN सेट
-    .order_by("created_at", true)                // बहु-फ़ील्ड सॉर्टिंग (true = desc)
+    .order_by("created_at", true)                // बहु-फ़ील्ड सॉर्ट (true = desc)
     .order_by("title", false)
-    .take(20)                                    // प्रति पेज संख्या
-    .skip(40);                                   // ऑफ़सेट
+    .take(20)                                    // प्रति पेज आइटम
+    .skip(40)                                    // ऑफ़सेट
+    .option("highlight", true)                   // ड्राइवर-विशिष्ट पासथ्रू विकल्प
+    .with_trashed();                             // सॉफ़्ट डिलीट तीन-अवस्था: बाहर रखें / सहित / केवल
 ```
 
-> `query` Lucene `query_string` सिंटैक्स का समर्थन करता है (ES ड्राइवर में पूर्ण रूप से प्रभावी):
-> `"rust"`, `"title:rust AND tags:async"`, `"rust~2"` (फ़ज़ी)। इन-मेमोरी ड्राइवर सबस्ट्रिंग मिलान से काम करता है।
+> `query` Lucene `query_string` सिंटैक्स का समर्थन करता है (ES ड्राइवर में पूरी तरह लागू):
+> `"rust"`, `"title:rust AND tags:async"`, `"rust~2"` (फ़ज़ी)। बाकी ड्राइवर अपने मूल
+> सिंटैक्स या सबस्ट्रिंग मिलान से काम चलाते हैं।
 
 ### पेजिनेशन
 
 ```rust
-// तरीका 1: ऑफ़सेट कट
+// तरीका 1: ऑफ़सेट कटौती
 let page2 = SearchBuilder::new("rust").within("books").skip(10).take(10);
-// तरीका 2: पेज-आधारित पेजिनेशन (page 1 से शुरू)
+// तरीका 2: पेज-आधारित (पेज 1 से शुरू)
 let page2 = engine.paginate(&SearchBuilder::new("rust").within("books"), 2, 10).await?;
 ```
 
 ### बहु-इंडेक्स और जीवनचक्र
 
 ```rust
-engine.create_index("books", serde_json::json!({})).await?;   // इंडेक्स बनाएं
-engine.update(&docs).await?;                                  // दस्तावेज़ लिखें
-engine.flush("books").await?;                                 // दृश्यता रीफ़्रेश करें
-engine.delete(&["book-1".to_string()]).await?;                // दस्तावेज़ हटाएं
-engine.delete_index("books").await?;                          // इंडेक्स हटाएं
+engine.create_index("books", serde_json::json!({})).await?;    // इंडेक्स बनाएँ
+engine.update(&docs).await?;                                   // दस्तावेज़ लिखें
+engine.update_bulk(&docs).await?;                              // बल्क लेखन (बैकएंड समर्थित हो तो bulk API)
+engine.flush("books").await?;                                  // दृश्यता रीफ़्रेश करें
+engine.search(&builder).await?;                                // क्वेरी
+engine.delete_in("books", &["book-1".to_string()]).await?;     // एक इंडेक्स से दस्तावेज़ हटाएँ
+engine.soft_delete(&["book-2".to_string()]).await?;            // सॉफ़्ट डिलीट (चिह्न लगाएँ)
+engine.reindex("books", "books_v2").await?;                    // इंडेक्स पुनर्निर्मित करें
+engine.delete_index("books").await?;                           // इंडेक्स हटाएँ
 ```
+
+> `delete` के साथ इंडेक्स की जानकारी नहीं जाती, इसलिए इसका अर्थ इंजन के अनुसार बदलता है
+> (इन-मेमोरी ड्राइवर सभी इंडेक्स में हटाता है, ES केवल `default` को छूता है)। किसी
+> निश्चित इंडेक्स के लिए `delete_in` इस्तेमाल करें।
 
 ### Elasticsearch / OpenSearch पर स्विच करना
 
@@ -174,22 +225,22 @@ cargo add rust-scout --features elasticsearch
 use rust_scout::{Engine, EngineManager, ScoutConfig};
 
 let config = ScoutConfig::elasticsearch(
-    "http://127.0.0.1:9200",      // या OpenSearch पता
+    "http://127.0.0.1:9200",      // या OpenSearch एंडपॉइंट
     Some("your-api-key".into()),   // वैकल्पिक: ApiKey प्रमाणीकरण
 );
 let engine = EngineManager::new(config).engine()?;
-// —— इसके बाद सभी ऑपरेशन इन-मेमोरी ड्राइवर के बिल्कुल समान हैं ——
+// —— इसके बाद सभी ऑपरेशन इन-मेमोरी ड्राइवर के समान हैं ——
 ```
 
-| तुलना | CollectionEngine (डिफ़ॉल्ट) | ElasticsearchEngine |
+| मद | CollectionEngine (डिफ़ॉल्ट) | ElasticsearchEngine |
 |--------|--------------------------|---------------------|
-| निर्भरताएँ | केवल serde / thiserror | reqwest (feature सक्षम) |
+| निर्भरताएँ | केवल serde / thiserror | reqwest (feature सक्रिय) |
 | पूर्ण-पाठ | सीरियलाइज़्ड सबस्ट्रिंग मिलान | `query_string` |
-| फ़िल्टर | मेमोरी में matches() | term / terms / must_not |
-| सॉर्टिंग | मेमोरी में sort_hits() | sort ऐरे |
+| फ़िल्टरिंग | इन-मेमोरी matches() | term / terms / must_not |
+| सॉर्टिंग | इन-मेमोरी sort_hits() | sort ऐरे |
 | flush | no-op | `_refresh` |
 | डिफ़ॉल्ट पेजिनेशन | सभी परिणाम | size 10 |
-| डिफ़ॉल्ट सॉर्टिंग | id से | _score से |
+| डिफ़ॉल्ट सॉर्टिंग | id के अनुसार | _score के अनुसार |
 
 ### Meilisearch पर स्विच करना
 
@@ -201,51 +252,61 @@ cargo add rust-scout --features meilisearch
 use rust_scout::{Engine, EngineManager, ScoutConfig};
 
 let config = ScoutConfig::meilisearch(
-    "http://127.0.0.1:7700",   // Meilisearch सेवा का पता
+    "http://127.0.0.1:7700",   // Meilisearch एंडपॉइंट
     "your-master-key",          // वैकल्पिक: API कुंजी
 );
 let engine = EngineManager::new(config).engine()?;
-// —— इसके बाद सभी ऑपरेशन इन-मेमोरी ड्राइवर के बिल्कुल समान हैं ——
+// —— इसके बाद सभी ऑपरेशन इन-मेमोरी ड्राइवर के समान हैं ——
 ```
 
 ### इंजन तुलना
 
-| इंजन | driver | feature | स्थिति |
-|------|--------|---------|------|
-| इन-मेमोरी (डिफ़ॉल्ट) | `collection` | अंतर्निहित | पूर्ण |
-| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | पूर्ण |
-| Meilisearch | `meilisearch` | `meilisearch` | पूर्ण |
-| Typesense | `typesense` | `typesense` | पूर्ण |
-| Algolia | `algolia` | `algolia` | पूर्ण |
-| SQLite | `database` | `database` | पूर्ण |
-| Null (परीक्षण/खोज अक्षम) | `null` | `null` | पूर्ण |
-| XunSearch | `xunsearch` | `xunsearch` | stub (लागू होना बाकी) |
+| इंजन | driver | feature | ट्रांसपोर्ट | स्थिति |
+|------|--------|---------|------|------|
+| इन-मेमोरी (डिफ़ॉल्ट) | `collection` | अंतर्निहित | इन-प्रोसेस | पूर्ण |
+| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | HTTP REST | पूर्ण |
+| Meilisearch | `meilisearch` | `meilisearch` | HTTP REST | पूर्ण |
+| Typesense | `typesense` | `typesense` | HTTP REST | पूर्ण |
+| Algolia | `algolia` | `algolia` | HTTP REST | पूर्ण |
+| SQLite | `database` | `database` | स्थानीय फ़ाइल | पूर्ण |
+| XunSearch | `xunsearch` | `xunsearch` | मूल TCP | पूर्ण |
+| Null (परीक्षण/खोज अक्षम) | `null` | `null` | — | पूर्ण |
 
-बाकी इंजनों के कॉन्फ़िग कंस्ट्रक्टर [docs.rs](https://docs.rs/rust-scout) पर देखें: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
+बाकी इंजनों के कॉन्फ़िगरेशन कंस्ट्रक्टर [docs.rs](https://docs.rs/rust-scout) पर देखें: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
 
-> SQLite इंजन (`database`) में `total` SQL स्तर की गिनती है (इंडेक्स + LIKE मोटा फ़िल्टर);
-> wheres / सॉफ्ट डिलीट मेमोरी फ़िल्टरिंग के बाद `hits.len() < total` हो सकता है, पेजिनेशन hits पर आधारित है।
+> SQLite इंजन (`database`) में `total` SQL परत की गिनती है (इंडेक्स + LIKE रूखा फ़िल्टर);
+> wheres / सॉफ़्ट डिलीट इन-मेमोरी फ़िल्टरिंग के बाद `hits.len() < total` कर सकते हैं,
+> और पेजिनेशन hits पर आधारित होता है।
 
 ### आरक्षित फ़ील्ड
 
-`__soft_deleted` सॉफ्ट डिलीट सुविधा (`Engine::soft_delete`, `SearchBuilder::with_trashed()`
-/ `only_trashed()`) द्वारा उपयोग किया जाने वाला आरक्षित फ़ील्ड नाम है, जिसके आधार पर इंजन सॉफ्ट-डिलीट दस्तावेज़ों को फ़िल्टर करता है। उपयोगकर्ता दस्तावेज़ों को **नहीं करना चाहिए**
-इस फ़ील्ड नाम को व्यावसायिक फ़ील्ड के रूप में उपयोग।
+`__soft_deleted` सॉफ़्ट डिलीट सुविधा (`Engine::soft_delete`, `SearchBuilder::with_trashed()`
+/ `only_trashed()`) का आरक्षित फ़ील्ड नाम है, जिसके आधार पर इंजन सॉफ़्ट-डिलीट किए गए
+दस्तावेज़ों को फ़िल्टर करते हैं। उपयोगकर्ता के दस्तावेज़ों को इस फ़ील्ड नाम का उपयोग
+बिज़नेस फ़ील्ड के रूप में **नहीं** करना चाहिए।
 
 ### त्रुटि प्रबंधन
 
-सभी ऑपरेशन `crate::Result<T>` लौटाते हैं, त्रुटियाँ एकीकृत `ScoutError` में समाहित होती हैं:
+सभी ऑपरेशन `crate::Result<T>` लौटाते हैं, और त्रुटियाँ एकीकृत `ScoutError` में समाहित होती हैं:
 
-- `InvalidIndexName` —— इंडेक्स नाम में स्पेस / `/` / `.` से शुरू होना आदि (लिखने से पहले सत्यापित)
-- `InvalidResult` —— दस्तावेज़ फ़ील्ड JSON ऑब्जेक्ट नहीं है
-- `Unsupported` —— feature सक्षम नहीं है आदि
-- `Json` —— serde त्रुटियाँ
-- `Http` / `Backend` —— ES ड्राइवर के नेटवर्क और बैकएंड त्रुटियाँ (feature सक्षम होने पर)
+| वेरिएंट | कब उत्पन्न होता है | feature |
+|------|----------|---------|
+| `InvalidIndexName` | इंडेक्स नाम में रिक्त स्थान / `/` / `\` हो, `.` से शुरू हो, या खाली हो (लिखने से पहले सत्यापन) | अंतर्निहित |
+| `InvalidResult` | दस्तावेज़ फ़ील्ड JSON ऑब्जेक्ट न हो | अंतर्निहित |
+| `Unsupported` | ड्राइवर का feature सक्रिय न हो, आवश्यक कॉन्फ़िग गायब हो, या इंजन वह ऑपरेशन समर्थित न करे | अंतर्निहित |
+| `Json` | serde सीरियलाइज़ेशन / डीसीरियलाइज़ेशन त्रुटि | अंतर्निहित |
+| `Http` | HTTP अनुरोध विफल (कनेक्शन, टाइमआउट, स्टेटस कोड) | HTTP चारों इंजन |
+| `Sqlx` | SQLite त्रुटि | `database` |
+| `Backend` | बैकएंड ने त्रुटि प्रतिक्रिया लौटाई, मूल संदेश ज्यों का त्यों | HTTP चारों इंजन / `xunsearch` |
+| `XunSearch` / `XunSearchIo` | प्रोटोकॉल पार्सिंग विफल / TCP I/O विफल | `xunsearch` |
 
-### व्यावसायिक मॉडल ब्रिजिंग (Searchable)
+प्रत्येक वेरिएंट के साथ एक निदान संकेत जुड़ा है, देखें [`ScoutError::pet_hint()`](#प्रोजेक्ट-पेट)।
 
-`Searchable` लागू करके व्यावसायिक संरचनाओं को इंडेक्स योग्य दस्तावेज़ों में मैप करें, और `SearchableStore` लागू करके
-`index_documents` / `remove_documents` / `search` तीनों ऑपरेशनों को एनकैप्सुलेट करें:
+### बिज़नेस मॉडल ब्रिजिंग (Searchable)
+
+`Searchable` लागू करके अपने बिज़नेस स्ट्रक्चर को इंडेक्स-योग्य दस्तावेज़ में मैप करें, और
+`SearchableStore` लागू करके तीन ऑपरेशन — `index_documents` / `remove_documents` / `search` —
+को समाहित करें:
 
 ```rust
 use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
@@ -260,20 +321,84 @@ impl Searchable for Article {
 }
 ```
 
+## प्रोजेक्ट पेट
+
+![प्रोजेक्ट पेट: सर्च हाउंड Scout](svg/pet.svg)
+
+**Scout · सर्च हाउंड** — दस्तावेज़ों को सूंघता है, इंडेक्स का पीछा करता है। जहाँ क्वेरी है,
+वहीं वह मौजूद है। चित्र रूप में [`svg/pet.svg`](svg/pet.svg) देखें; टर्मिनल में वह ऐसा दिखता है:
+
+```console
+$ cargo run --example pet
+```
+
+```
+
+      ___              ___
+     /   \            /   \
+    |     |__________|     |
+    |     /          \     |
+    |    |   o    o   |    |
+    |    |     __     |    |
+    |     \   /  \   /     |
+     \     \  \__/  /     /
+      \     \________/    /
+       \_________________/
+         \   ~~~~~~   /
+          \__________/
+             |    |
+            _|    |_
+           |__|  |__|
+
+
+   ,^.     ,^.     ,^.     ,^.
+
+  Scout · 嗅探猎犬 · rust-scout
+  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+```
+
+पेट [`rust_scout::pet`](../../../src/pet.rs) मॉड्यूल में रहता है और **कोई निर्भरता नहीं जोड़ता**:
+
+| मद | विवरण |
+|----|------|
+| `pet::NAME` / `pet::SPECIES` / `pet::TAGLINE` | नाम-पट्टिका की जानकारी |
+| `pet::ART` | ASCII चित्र (जानबूझकर केवल 7-बिट ASCII, ताकि CJK टर्मिनल में कभी टेढ़ा न दिखे) |
+| `pet::banner()` | टर्मिनल बैनर, शुद्ध टेक्स्ट, कोई एस्केप सीक्वेंस नहीं, लॉग में सुरक्षित |
+| `pet::hint(&err)` | हर त्रुटि के लिए निदान संकेत, `&'static str` लौटाता है |
+| `pet::format_error(&err)` | मूल त्रुटि + संकेत, मनुष्यों के लिए पठनीय रूप में |
+| `ScoutError::pet_hint()` | वही संकेत, सीधे त्रुटि प्रकार पर |
+
+```rust
+use rust_scout::{pet, ScoutError};
+
+println!("{}", pet::banner());
+
+let err = ScoutError::Unsupported("missing feature".into());
+eprintln!("{}", pet::format_error(&err));
+// error: unsupported operation: missing feature
+//
+//   [o_o] Scout：这个后端我还没找到路 —— Cargo.toml 里对应的 feature 启用了吗？
+```
+
+> **त्रुटि संकेत को सीधे `Display` में क्यों नहीं डाला गया?** `ScoutError` का `Display`
+> एक-पंक्ति और मशीन-पठनीय रहता है — `?` प्रसार, लॉग संग्रह और CI में त्रुटि स्ट्रिंग
+> grep करना सब इसी पर निर्भर हैं। पेट संकेत सहित मानव-पठनीय आउटपुट के लिए
+> `pet::format_error()` इस्तेमाल करें।
+
 ## समर्थन और दान
 
-अगर यह प्रोजेक्ट आपके लिए उपयोगी है, तो दान करके समर्थन करें ☕ — आपका समर्थन निरंतर विकास की प्रेरणा है!
+अगर यह प्रोजेक्ट आपके काम आया है, तो दान देकर समर्थन करें ☕ — आपका समर्थन निरंतर रखरखाव की प्रेरणा है!
 
 ### वीचैट / अलीपे
 
-<img src="../../../docs/weixinpay.png" alt="微信打赏" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="支付宝打赏" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="वीचैट दान" width="130" height="130"/>
+<img src="../../../docs/alipay.png" alt="अलीपे दान" width="130" height="130"/>
 
-वीचैट स्कैन करें · अलीपे स्कैन करें
+वीचैट से स्कैन करें · अलीपे से स्कैन करें
 
 ### क्रिप्टोकरेंसी दान
 
-| मुख्य नेटवर्क | वॉलेट पता | QR कोड |
+| नेटवर्क | वॉलेट पता | QR कोड |
 |------|----------|--------|
 | BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
 | Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
@@ -288,31 +413,32 @@ impl Searchable for Article {
 
 ### वैश्विक स्थानांतरण (बैंक रेमिटेंस)
 
-**प्राप्तकर्ता जानकारी**
+**प्राप्तकर्ता की जानकारी**
 
 - प्राप्तकर्ता का नाम: WANG KEXUN
-- प्राप्तकर्ता खाता संख्या: 881015918251
+- खाता संख्या: 881015918251
 
 **प्राप्तकर्ता बैंक (ZA Bank)**
 
 - SWIFT Code: `AABLHKHHXXX`
 - बैंक का नाम: ZA Bank Limited
-- बैंक संख्या: 387
-- बैंक का पता: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
+- बैंक कोड: 387
+- बैंक पता: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
 
-> क्रॉस-बॉर्डर रेमिटेंस संवाददाता बैंक (मध्यस्थ बैंक) की जानकारी, प्राप्तकर्ता बैंक की नहीं। कृपया अपने भेजने वाले बैंक से पूछें कि क्या यह जानकारी आवश्यक है।
+> नीचे दी गई कॉरेस्पॉन्डेंट बैंक (मध्यस्थ बैंक) जानकारी सीमा-पार रेमिटेंस के लिए है, यह
+> प्राप्तकर्ता बैंक की जानकारी नहीं है। कृपया अपने रेमिटिंग बैंक से पूछें कि यह आवश्यक है या नहीं।
 
-- हांगकांग डॉलर, रॅन्मिन्बी और अमेरिकी डॉलर में रेमिटेंस के लिए संवाददाता बैंक **Citibank** है:
+- HKD, CNY और USD में भेजे गए धन के लिए कॉरेस्पॉन्डेंट बैंक **Citibank** है:
   - बैंक का नाम: Citibank N.A. Hong Kong
   - SWIFT Code: `CITIHKHXXXX`
-  - बैंक संख्या: 006 / शाखा संख्या: 391
+  - बैंक कोड: 006 / शाखा कोड: 391
   - शाखा का नाम: Hong Kong Branch
-  - बैंक का पता: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- अन्य मुद्राओं में रेमिटेंस के लिए संवाददाता बैंक **BNY Mellon** है:
+  - बैंक पता: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
+- अन्य मुद्राओं में भेजे गए धन के लिए कॉरेस्पॉन्डेंट बैंक **BNY Mellon** है:
   - बैंक का नाम: THE BANK OF NEW YORK MELLON
   - SWIFT Code: `IRVTUS3NXXX`
-  - बैंक का पता: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
+  - बैंक पता: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## लाइसेंस
 
-MIT License। अधिक जानकारी के लिए [LICENSE](../../../LICENSE) देखें।
+MIT License। विवरण के लिए [LICENSE](../../../LICENSE) देखें।

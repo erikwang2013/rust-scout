@@ -155,12 +155,16 @@ impl DatabaseEngine {
         let mut fetch_sql =
             String::from("SELECT id, data FROM scout_documents WHERE index_name = ?");
         if like {
-            count_sql.push_str(" AND searchable LIKE ?");
-            fetch_sql.push_str(" AND searchable LIKE ?");
+            count_sql.push_str(" AND searchable LIKE ? ESCAPE '\\'");
+            fetch_sql.push_str(" AND searchable LIKE ? ESCAPE '\\'");
         }
         fetch_sql.push_str(" LIMIT ? OFFSET ?");
 
-        let pattern = format!("%{q}%");
+        // LIKE 的通配符必须转义成字面量：不转义时查 "50%" 会变成 "50 后跟任意"，
+        // 粗筛放过额外行，而这些行不计入 hits（内存 matches() 会滤掉）却计入
+        // SQL 层 total。CollectionEngine 的 contains() 是字面匹配，转义后两个
+        // 驱动的语义才对得上。
+        let pattern = format!("%{}%", escape_like(&q));
         let mut count_query = sqlx::query(&count_sql).bind(index);
         let mut fetch_query = sqlx::query(&fetch_sql).bind(index);
         if like {
@@ -202,6 +206,19 @@ impl DatabaseEngine {
             ..SearchResult::default()
         })
     }
+}
+
+/// 把 LIKE 元字符转义成字面量（配合 `ESCAPE '\'`）。反斜杠必须先处理，
+/// 否则会把后面刚插入的转义符再转一次。
+fn escape_like(q: &str) -> String {
+    let mut out = String::with_capacity(q.len());
+    for c in q.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn trashed_allows(builder: &SearchBuilder, doc: &SearchDocument) -> bool {
@@ -251,9 +268,6 @@ impl Engine for DatabaseEngine {
         })
     }
 
-    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
-        result.ids()
-    }
 
     fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
         // no-op：无独立索引存储，写入即对查询可见（与 PHP Scout 的 database
@@ -312,6 +326,33 @@ mod tests {
         let mut d = SearchDocument::new(id, fields).unwrap();
         d.index = index.map(str::to_string);
         d
+    }
+
+    #[test]
+    fn escape_like_neutralises_wildcards() {
+        assert_eq!(escape_like("plain"), "plain");
+        assert_eq!(escape_like("50%"), "50\\%");
+        assert_eq!(escape_like("a_b"), "a\\_b");
+        // 反斜杠自身必须转义，否则会吃掉后插入的转义符
+        assert_eq!(escape_like("a\\b"), "a\\\\b");
+    }
+
+    #[tokio::test]
+    async fn like_wildcards_in_query_are_treated_literally() {
+        let engine = engine().await;
+        engine
+            .update(&[
+                doc("pct", None, serde_json::json!({"title": "50% off"})),
+                doc("num", None, serde_json::json!({"title": "50123 items"})),
+            ])
+            .await
+            .unwrap();
+
+        // "%" 是字面量：只应命中真正含 "50%" 的那条，total 不该把 "50123" 算进去
+        let r = engine.search(&SearchBuilder::new("50%")).await.unwrap();
+        assert_eq!(r.hits.len(), 1);
+        assert_eq!(r.hits[0].id, "pct");
+        assert_eq!(r.total, 1, "SQL 层 total 不应被 LIKE 通配符放大");
     }
 
     #[tokio::test]

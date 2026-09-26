@@ -17,6 +17,7 @@ pub mod manager;
 pub mod meilisearch_engine;
 #[cfg(feature = "null")]
 pub mod null_engine;
+pub mod pet;
 pub mod result;
 pub mod searchable;
 #[cfg(feature = "typesense")]

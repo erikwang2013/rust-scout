@@ -28,8 +28,8 @@
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
   <text x="118" y="226" class="name">驱动抽象 — Engine trait 是唯一的接缝</text>
-  <text x="118" y="246" class="desc">8 个操作定义统一契约，异步 EngineFuture 返回。换后端 = 改配置，业务代码零改动。</text>
-  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::elasticsearch(host, key)).engine()?;  // 或 collection()</text>
+  <text x="118" y="246" class="desc">8 个必需方法 + 5 个带默认实现（共 13 个），异步经 EngineFuture 返回。八种后端共用一份契约，换后端 = 改配置。</text>
+  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // 或 collection() / database() / ..</text>
 
   <!-- 3 -->
   <rect x="40" y="298" width="1020" height="92" class="card"/>
@@ -37,21 +37,21 @@
   <text x="80" y="340" text-anchor="middle" class="num">3</text>
   <text x="118" y="330" class="name">数据契约先行 — serde JSON</text>
   <text x="118" y="350" class="desc">写入、查询、结果全部是 JSON 结构化数据，驱动无关。Searchable 桥接业务模型与文档。</text>
-  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total }</text>
+  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total, facets? }</text>
 
   <!-- 4 -->
   <rect x="40" y="402" width="1020" height="92" class="card"/>
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
   <text x="118" y="434" class="name">简单优先 — 默认零依赖</text>
-  <text x="118" y="454" class="desc">默认内存驱动开箱即用，仅依赖 serde/thiserror；Elasticsearch 驱动是可选 feature，按需引入。</text>
-  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"]   // cargo add rust-scout --features elasticsearch</text>
+  <text x="118" y="454" class="desc">默认内存驱动开箱即用，核心只依赖 serde / thiserror。八个后端各自 feature 门控，按需引入，不用的不编译。</text>
+  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
   <rect x="40" y="506" width="1020" height="92" class="card"/>
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
   <text x="118" y="538" class="name">安全边界 — 输入校验 + 输出转义</text>
-  <text x="118" y="558" class="desc">索引名在进入 URL 前经 validate_index_name 校验，id/index 经 RFC 3986 百分号编码，杜绝路径注入与错误索引写入。</text>
-  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) →  /{index}/_doc/{id}</text>
+  <text x="118" y="558" class="desc">索引名先经 validate_index_name 校验（拒空白 / 斜杠 / 前导点），所有 HTTP 引擎的 index 与 id 再按 RFC 3986 逐字节百分号编码。</text>
+  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

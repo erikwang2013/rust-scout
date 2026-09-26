@@ -158,9 +158,6 @@ impl Engine for CollectionEngine {
         })
     }
 
-    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
-        result.ids()
-    }
 
     fn flush<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
         // no-op: mirrors ES _refresh; delete_index is the explicit removal path

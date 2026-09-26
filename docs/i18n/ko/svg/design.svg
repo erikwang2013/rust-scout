@@ -12,46 +12,46 @@
     </style>
   </defs>
 
-  <text x="550" y="42" text-anchor="middle" class="title">설계 철학</text>
-  <text x="550" y="66" text-anchor="middle" class="sub">다섯 가지 설계 원칙 — 각각은 코드의 구체적인 결정과 대응</text>
+  <text x="550" y="42" text-anchor="middle" class="title">설계 사상</text>
+  <text x="550" y="66" text-anchor="middle" class="sub">다섯 가지 설계 원칙 — 각각 코드의 구체적인 결정에 대응</text>
 
   <!-- 1 -->
   <rect x="40" y="90" width="1020" height="92" class="card"/>
   <rect x="60" y="106" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="132" text-anchor="middle" class="num">1</text>
   <text x="118" y="122" class="name">Scout 스타일 체인 API</text>
-  <text x="118" y="142" class="desc">Laravel Scout의 사고방식을 따름: 먼저 쿼리를 구성한 뒤 한 번의 호출로 실행. 쿼리와 실행을 분리하여 재사용과 테스트가 쉽습니다.</text>
+  <text x="118" y="142" class="desc">Laravel Scout 의 사고방식을 따름: 먼저 쿼리를 구성하고 한 번만 실행한다. 쿼리와 실행을 분리해 재사용과 테스트를 쉽게 한다.</text>
   <text x="118" y="162" class="code">let b = SearchBuilder::new(q).within(i).where_field(f, v).order_by(k, true).take(10);</text>
 
   <!-- 2 -->
   <rect x="40" y="194" width="1020" height="92" class="card"/>
   <rect x="60" y="210" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="236" text-anchor="middle" class="num">2</text>
-  <text x="118" y="226" class="name">드라이버 추상화 — Engine trait이 유일한 접합점</text>
-  <text x="118" y="246" class="desc">8가지 작업이 통일 계약을 정의하고 async EngineFuture로 반환. 백엔드 변경 = 설정 변경, 비즈니스 코드 변경 없음.</text>
-  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::elasticsearch(host, key)).engine()?;  // 或 collection()</text>
+  <text x="118" y="226" class="name">드라이버 추상화 — Engine trait 가 유일한 이음새</text>
+  <text x="118" y="246" class="desc">필수 메서드 8개 + 기본 구현 5개, 비동기는 EngineFuture 로 반환. 8가지 백엔드가 하나의 계약을 공유하며, 교체는 설정 변경뿐.</text>
+  <text x="118" y="266" class="code">EngineManager::new(ScoutConfig::meilisearch(host, key)).engine()?;  // 또는 collection() / database() / ..</text>
 
   <!-- 3 -->
   <rect x="40" y="298" width="1020" height="92" class="card"/>
   <rect x="60" y="314" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="340" text-anchor="middle" class="num">3</text>
   <text x="118" y="330" class="name">데이터 계약 우선 — serde JSON</text>
-  <text x="118" y="350" class="desc">쓰기, 쿼리, 결과는 모두 JSON 구조화 데이터이며 드라이버와 무관. Searchable이 비즈니스 모델과 문서를 연결.</text>
-  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total }</text>
+  <text x="118" y="350" class="desc">쓰기, 쿼리, 결과는 모두 JSON 구조화 데이터이며 드라이버 비의존. Searchable 이 비즈니스 모델과 문서를 연결한다.</text>
+  <text x="118" y="370" class="code">SearchDocument { id, index?, fields(flatten) } ⇄ SearchBuilder ⇄ SearchResult { hits, total, facets? }</text>
 
   <!-- 4 -->
   <rect x="40" y="402" width="1020" height="92" class="card"/>
   <rect x="60" y="418" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="444" text-anchor="middle" class="num">4</text>
-  <text x="118" y="434" class="name">단순함 우선 — 기본은 의존성 없음</text>
-  <text x="118" y="454" class="desc">기본 메모리 드라이버는 즉시 사용 가능하며 serde/thiserror에만 의존. Elasticsearch 드라이버는 선택 feature로 필요 시 도입.</text>
-  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"]   // cargo add rust-scout --features elasticsearch</text>
+  <text x="118" y="434" class="name">단순 우선 — 기본 의존성 제로</text>
+  <text x="118" y="454" class="desc">기본 메모리 드라이버는 바로 사용 가능, 코어 의존성은 serde / thiserror 뿐. 8가지 백엔드는 각자 feature 로 게이트되어 필요한 것만 포함된다.</text>
+  <text x="118" y="474" class="code">[features] default = [] · elasticsearch = ["dep:reqwest"] · database = ["dep:sqlx"] · xunsearch = ["dep:tokio"]</text>
 
   <!-- 5 -->
   <rect x="40" y="506" width="1020" height="92" class="card"/>
   <rect x="60" y="522" width="40" height="40" rx="20" class="rule"/>
   <text x="80" y="548" text-anchor="middle" class="num">5</text>
-  <text x="118" y="538" class="name">보안 경계 — 입력 검증 + 출력 이스케이프</text>
-  <text x="118" y="558" class="desc">인덱스 이름은 URL에 들어가기 전에 validate_index_name으로 검증되고, id/index는 RFC 3986 퍼센트 인코딩되어 경로 주입과 잘못된 인덱스 쓰기를 차단.</text>
-  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) →  /{index}/_doc/{id}</text>
+  <text x="118" y="538" class="name">안전 경계 — 입력 검증 + 출력 이스케이프</text>
+  <text x="118" y="558" class="desc">색인 이름은 먼저 validate_index_name 으로 검증하고(공백 / 슬래시 / 선행 점 거부), HTTP 엔진의 index 와 id 를 RFC 3986 으로 퍼센트 인코딩한다.</text>
+  <text x="118" y="578" class="code">validate_index_name(index)?;  →  percent_encode(index) + percent_encode(id)</text>
 </svg>

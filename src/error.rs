@@ -38,4 +38,15 @@ pub enum ScoutError {
     XunSearchIo(#[from] std::io::Error),
 }
 
+impl ScoutError {
+    /// 项目宠物「嗅探猎犬 Scout」针对这个错误的排查提示。
+    ///
+    /// 每个错误变体对应一句人话方向，例如索引名非法时会提示命名规则、
+    /// `Unsupported` 时会提示检查 feature。渲染成完整文本用
+    /// [`crate::pet::format_error`]。
+    pub fn pet_hint(&self) -> &'static str {
+        crate::pet::hint(self)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, ScoutError>;

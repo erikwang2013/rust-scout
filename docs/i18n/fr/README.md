@@ -4,13 +4,19 @@
 [![docs.rs](https://img.shields.io/docsrs/rust-scout)](https://docs.rs/rust-scout)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../../LICENSE)
 
-[简体中文](../../../README.md) · [English](../en/README.md) · [日本語](../ja/README.md) · [한국어](../ko/README.md) · [Русский](../ru/README.md) · [Deutsch](../de/README.md) · Français · [Español](../es/README.md) · [Português](../pt/README.md) · [हिन्दी](../hi/README.md) · [العربية](../ar/README.md) · [বাংলা](../bn/README.md) · [Bahasa Indonesia](../id/README.md)
+[简体中文](../../../README.md) · [English](../en/README.md) · [日本語](../ja/README.md) · [한국어](../ko/README.md) · [Bahasa Indonesia](../id/README.md) · [Русский](../ru/README.md) · [Deutsch](../de/README.md) · Français · [Español](../es/README.md) · [Português](../pt/README.md) · [हिन्दी](../hi/README.md) · [العربية](../ar/README.md) · [বাংলা](../bn/README.md)
 
-**rust-scout — abstraction de recherche plein texte** — une couche d'interface légère pour la recherche plein texte en Rust. S'inspirant de la philosophie de requêtes chaînées de [Laravel Scout](https://laravel.com/docs/scout), elle abstrait via un trait `Engine` unifié plusieurs backends : mémoire, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite et autres : **pour le développement, un moteur mémoire sans dépendance ; pour la production, une bascule transparente vers n'importe quel backend, sans toucher au code métier.**
+**rust-scout, abstraction de bibliothèque de recherche plein texte** — une couche d'interface de recherche plein texte légère pour Rust. Reprenant le modèle mental des requêtes chaînées de [Laravel Scout](https://laravel.com/docs/scout), elle abstrait **8 backends** (mémoire, Elasticsearch/OpenSearch, Meilisearch, Typesense, Algolia, SQLite, XunSearch, Null) via un trait `Engine` unifié : **pilote mémoire sans dépendance pour le développement, bascule transparente vers n'importe quel backend en production, sans modifier une seule ligne de code métier.**
+
+![Animal de compagnie du projet : Scout le chien renifleur](svg/pet.svg)
+
+> Animal de compagnie du projet, **Scout le chien renifleur** (Search Hound) — il renifle les documents, traque les index.
+> Il n'est pas que dans la doc : bannière de terminal et messages d'erreur aussi.
+> Voir [Animal de compagnie](#animal-de-compagnie).
 
 ```rust
 let result = engine.search(
-    SearchBuilder::new("rust 异步")
+    SearchBuilder::new("rust async")
         .within("articles")
         .where_field("status", "published")
         .order_by("created_at", true)
@@ -20,27 +26,37 @@ let result = engine.search(
 
 ## Fonctionnalités
 
-| Fonctionnalité | Description |
+| Capacité | Description |
 |------|------|
-| 🔍 Recherche plein texte | Moteur mémoire : correspondance de sous-chaînes ; moteur ES : syntaxe `query_string` (`champ:valeur`) |
-| ⚙️ Requêtes chaînées | `SearchBuilder` : query / within / where_field / where_in / where_not_in / order_by / take / skip |
+| 🔍 Recherche plein texte | Pilote mémoire : correspondance de sous-chaînes ; pilotes HTTP : syntaxe native du backend (ES : `query_string`, `champ:valeur`) |
+| ⚙️ Requêtes chaînées | `SearchBuilder` : query / within / where_field / where_in / where_not_in / order_by / take / skip / option |
 | 🎯 Filtrage exact | Correspondance d'égalité (ES → `term`), correspondance d'ensemble (ES → `terms` / `must_not`) |
-| 📄 Tri multi-champs | asc / desc cumulables |
+| 📄 Tri multi-champs | asc / desc cumulables, ordre déterministe entre types JSON |
 | 📃 Pagination | Découpe par décalage `take`/`skip` + pagination par pages `paginate(page, per_page)` |
-| 🗂️ Index multiples | Routage via le champ `index` du document, index par défaut `"default"` |
-| 🔄 Cycle de vie de l'index | Cycle complet `create_index` / `flush` / `delete_index` |
-| 🔌 Moteurs enfichables | Par défaut mémoire sans dépendance ; features `elasticsearch` / `meilisearch` / `typesense` / `algolia` / `database` / `null` à la demande ; `xunsearch` est un stub |
-| 🔒 Limites de sécurité | Validation du nom d'index (`validate_index_name`) + encodage en pourcentage RFC 3986, empêche l'injection de chemin |
+| 🗂️ Index multiples | Routage par champ `index` au niveau du document, index par défaut `"default"` |
+| 🔄 Cycle de vie de l'index | Cycle complet `create_index` / `flush` / `reindex` / `delete_index` |
+| 🗑️ Suppression logique | `soft_delete` pose `__soft_deleted` ; filtrage à trois états `with_trashed()` / `only_trashed()` |
+| 📦 Opérations en lot | `update_bulk` / `delete_bulk` réduisent les allers-retours ; `delete_in` cible un index précis |
+| 🔌 Pilotes enfichables | Mémoire sans dépendance par défaut ; 8 backends chacun derrière sa feature — l'inutilisé ne se compile pas |
+| 🔒 Limite de sécurité | Validation du nom d'index (`validate_index_name`) + encodage pourcent RFC 3986, contre l'injection de chemin |
+| 🐕 Animal de compagnie | Scout le chien renifleur : bannière de terminal + aide au diagnostic par erreur (`rust_scout::pet`) |
 
 ## Architecture
 
 ![Architecture](svg/architecture.svg)
 
-## Aperçu des fonctionnalités
+Cinq couches : application → contrat de données (serde JSON) → cœur (`EngineManager` + trait `Engine`)
+→ pilotes (groupés par transport, 8 au total) → stockage. Seul le trait `Engine` traverse les couches.
+
+## Conception des fonctionnalités
 
 ![Fonctionnalités](svg/features.svg)
 
-## Conception
+12 capacités : requêtes chaînées, plein texte, filtrage exact/ensemble, tri, pagination, index
+multiples, suppression logique, cycle de vie de l'index, suppression en lot et ciblée, pilotes
+enfichables, limite de sécurité.
+
+## Philosophie de conception
 
 ![Conception](svg/design.svg)
 
@@ -48,29 +64,54 @@ let result = engine.search(
 
 ![Cycle de vie](svg/lifecycle.svg)
 
+Sept étapes : création → écriture → flush → recherche → suppression de documents → reconstruction → destruction.
+La moitié basse du schéma compare le comportement des quatre familles de pilotes à chaque étape.
+
 ## Structure du projet
 
 ```
 rust-scout/
-├── Cargo.toml            # 依赖与 feature 声明（elasticsearch 可选）
+├── Cargo.toml              # dépendances + features (default = [], zéro dépendance)
 ├── src/
-│   ├── lib.rs            # crate 根：模块导出 + 公开类型再导出
-│   ├── engine.rs         # Engine trait：驱动统一接口（8 个操作）
-│   ├── manager.rs        # EngineManager：门面，按配置分发驱动
-│   ├── config.rs         # ScoutConfig + validate_index_name
-│   ├── builder.rs        # SearchBuilder：链式查询构建与匹配/排序逻辑
-│   ├── document.rs       # SearchDocument：写入文档（serde JSON 契约）
-│   ├── result.rs         # SearchResult / SearchHit：查询结果
-│   ├── searchable.rs     # Searchable / SearchableStore：业务模型桥接
-│   ├── error.rs          # ScoutError + Result<T>
-│   ├── collection_engine.rs  # 内存驱动（默认）
-│   └── elasticsearch_engine.rs # ES/OpenSearch 驱动（feature 可选）
-├── tests/                # 集成测试（当前为空）
-├── examples/             # 示例（当前为空）
+│   ├── lib.rs              # racine du crate : exports de modules + ré-exports derrière feature
+│   │
+│   ├── engine.rs           # trait Engine : le contrat unique des pilotes (8 requis + 5 par défaut)
+│   ├── manager.rs          # EngineManager : façade, dispatch par driver et cache Arc<dyn Engine>
+│   ├── config.rs           # ScoutConfig (8 constructeurs) + validate_index_name + percent_encode
+│   │
+│   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter : requêtes chaînées
+│   ├── document.rs         # SearchDocument : le document écrit (contrat serde JSON)
+│   ├── result.rs           # SearchResult / SearchHit : résultats de requête
+│   ├── searchable.rs       # Searchable / SearchableStore : pont vers les modèles métier
+│   ├── error.rs            # ScoutError + Result<T> + pet_hint()
+│   ├── pet.rs              # animal de compagnie : Scout le chien renifleur (bannière + aides)
+│   │
+│   ├── collection_engine.rs    # pilote mémoire (défaut, zéro dépendance)
+│   ├── null_engine.rs          # pilote vide : ignore les écritures, toujours vide   [null]
+│   ├── elasticsearch_engine.rs # ES / OpenSearch (REST)                             [elasticsearch]
+│   │   └── query.rs            #   construction query_string + parsing des réponses
+│   ├── meilisearch_engine.rs   # Meilisearch (REST)                                 [meilisearch]
+│   ├── typesense_engine.rs     # Typesense (REST)                                   [typesense]
+│   │   └── typesense_query.rs  #   paramètres de recherche + construction filter_by
+│   ├── algolia_engine.rs       # Algolia (cloud hébergé REST)                       [algolia]
+│   ├── database_engine.rs      # SQLite (sqlx, préfiltre LIKE + affinage mémoire)   [database]
+│   ├── xunsearch_engine.rs     # XunSearch : protocole TCP natif xunsearchd         [xunsearch]
+│   │   ├── xunsearch_query.rs  #   codec de paquets + schéma de champs ini
+│   │   └── xunsearch_tests.rs  #   tests de bout en bout contre un serveur mock
+│   │
+│   └── (les tests unitaires sont en ligne dans chaque module sous #[cfg(test)] mod tests)
+├── tests/                  # tests d'intégration (vides pour l'instant ; les tests sont dans src)
+├── examples/
+│   └── pet.rs              # cargo run --example pet : bannière + démo des aides d'erreur
 └── docs/
-    ├── svg/              # 本 README 引用的架构/功能/设计/生命周期图
-    └── superpowers/specs/ # 设计文档
+    ├── svg/                # animal + schémas architecture / fonctionnalités / conception / cycle de vie
+    ├── i18n/               # README et SVG correspondants pour 12 langues
+    ├── coin/               # QR codes de don
+    └── superpowers/specs/  # documents de conception
 ```
+
+> Le tag `[feature]` indique la feature Cargo requise par un pilote. Si elle est désactivée,
+> `EngineManager` renvoie `ScoutError::Unsupported` au lieu de dégrader silencieusement.
 
 ## Démarrage rapide
 
@@ -78,21 +119,21 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.1"
-tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
+rust-scout = "0.3"
+tokio = { version = "1", features = ["macros", "rt"] }   # exemple uniquement
 ```
 
-### 2. Exemple minimal (moteur mémoire par défaut)
+### 2. Exemple minimal (pilote mémoire par défaut)
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
 
 #[tokio::main]
 async fn main() -> rust_scout::Result<()> {
-    // 默认驱动：内存 CollectionEngine，零依赖开箱即用
+    // pilote par défaut : CollectionEngine en mémoire, zéro dépendance
     let engine = EngineManager::new(ScoutConfig::collection()).engine()?;
 
-    // 写入文档
+    // écrire un document
     let mut book = SearchDocument::new(
         "book-1",
         serde_json::json!({
@@ -105,7 +146,7 @@ async fn main() -> rust_scout::Result<()> {
     book.index = Some("books".to_string());
     engine.update(&[book]).await?;
 
-    // 查询
+    // requête
     let result = engine
         .search(
             SearchBuilder::new("rust")
@@ -131,38 +172,47 @@ async fn main() -> rust_scout::Result<()> {
 Toutes les opérations de requête s'enchaînent et sont finalement passées à `engine.search(&builder)` :
 
 ```rust
-let builder = SearchBuilder::new("全文关键词")   // 全文搜索（可选，空串 = 匹配全部）
-    .within("articles")                          // 指定索引（可选，默认 "default"）
-    .where_field("status", "published")          // 等值过滤
-    .where_in("tags", ["rust", "async"])         // IN 集合
-    .where_not_in("category", ["draft"])         // NOT IN 集合
-    .order_by("created_at", true)                // 多字段排序（true = desc）
+let builder = SearchBuilder::new("mots-clés plein texte")  // plein texte (optionnel, vide = tout)
+    .within("articles")                          // index cible (optionnel, défaut "default")
+    .where_field("status", "published")          // filtre d'égalité
+    .where_in("tags", ["rust", "async"])         // ensemble IN
+    .where_not_in("category", ["draft"])         // ensemble NOT IN
+    .order_by("created_at", true)                // tri multi-champs (true = desc)
     .order_by("title", false)
-    .take(20)                                    // 每页条数
-    .skip(40);                                   // 偏移
+    .take(20)                                    // taille de page
+    .skip(40)                                    // décalage
+    .option("highlight", true)                   // options transmises au pilote
+    .with_trashed();                             // trois états : exclure / inclure / seulement
 ```
 
-> `query` prend en charge la syntaxe Lucene `query_string` (pleinement effective avec le moteur ES) :
-> `"rust"`, `"title:rust AND tags:async"`, `"rust~2"` (flou). Le moteur mémoire la traite comme une correspondance de sous-chaînes.
+> `query` prend en charge la syntaxe Lucene `query_string` (pleinement effective avec le pilote ES) : `"rust"`, `"title:rust AND tags:async"`, `"rust~2"` (flou). Les autres pilotes utilisent leur syntaxe native ou la correspondance de sous-chaînes.
 
 ### Pagination
 
 ```rust
-// 方式一：偏移截取
+// Option 1 : découpe par décalage
 let page2 = SearchBuilder::new("rust").within("books").skip(10).take(10);
-// 方式二：页码分页（page 从 1 起）
+// Option 2 : pagination par pages (page commence à 1)
 let page2 = engine.paginate(&SearchBuilder::new("rust").within("books"), 2, 10).await?;
 ```
 
 ### Index multiples et cycle de vie
 
 ```rust
-engine.create_index("books", serde_json::json!({})).await?;   // 建索引
-engine.update(&docs).await?;                                  // 写文档
-engine.flush("books").await?;                                 // 刷新可见性
-engine.delete(&["book-1".to_string()]).await?;                // 删文档
-engine.delete_index("books").await?;                          // 删索引
+engine.create_index("books", serde_json::json!({})).await?;    // créer l'index
+engine.update(&docs).await?;                                   // écrire des documents
+engine.update_bulk(&docs).await?;                              // écriture en lot (endpoint bulk si dispo)
+engine.flush("books").await?;                                  // rafraîchir la visibilité
+engine.search(&builder).await?;                                // requête
+engine.delete_in("books", &["book-1".to_string()]).await?;     // supprimer les docs d'un index
+engine.soft_delete(&["book-2".to_string()]).await?;            // suppression logique (marquage)
+engine.reindex("books", "books_v2").await?;                    // reconstruire un index
+engine.delete_index("books").await?;                           // supprimer l'index
 ```
+
+> `delete` ne porte aucune information d'index : sa sémantique varie selon le moteur (le pilote
+> mémoire supprime dans tous les index ; ES ne touche que `default`). Utilisez `delete_in` pour
+> cibler un index précis.
 
 ### Passer à Elasticsearch / OpenSearch
 
@@ -174,16 +224,16 @@ cargo add rust-scout --features elasticsearch
 use rust_scout::{Engine, EngineManager, ScoutConfig};
 
 let config = ScoutConfig::elasticsearch(
-    "http://127.0.0.1:9200",      // 或 OpenSearch 地址
-    Some("your-api-key".into()),   // 可选：ApiKey 认证
+    "http://127.0.0.1:9200",      // ou une adresse OpenSearch
+    Some("your-api-key".into()),  // optionnel : authentification ApiKey
 );
 let engine = EngineManager::new(config).engine()?;
-// —— 之后所有操作与内存驱动完全一致 ——
+// — toutes les opérations ci-dessous sont identiques au pilote mémoire —
 ```
 
 | Critère | CollectionEngine (défaut) | ElasticsearchEngine |
 |--------|--------------------------|---------------------|
-| Dépendances | serde / thiserror uniquement | reqwest (feature activé) |
+| Dépendances | serde / thiserror uniquement | reqwest (feature activée) |
 | Plein texte | Correspondance de sous-chaînes sérialisées | `query_string` |
 | Filtrage | matches() en mémoire | term / terms / must_not |
 | Tri | sort_hits() en mémoire | tableau sort |
@@ -201,48 +251,56 @@ cargo add rust-scout --features meilisearch
 use rust_scout::{Engine, EngineManager, ScoutConfig};
 
 let config = ScoutConfig::meilisearch(
-    "http://127.0.0.1:7700",   // Meilisearch 服务地址
-    "your-master-key",          // 可选：API 密钥
+    "http://127.0.0.1:7700",   // adresse du service Meilisearch
+    "your-master-key",         // optionnel : clé d'API
 );
 let engine = EngineManager::new(config).engine()?;
-// —— 之后所有操作与内存驱动完全一致 ——
+// — toutes les opérations ci-dessous sont identiques au pilote mémoire —
 ```
 
 ### Comparatif des moteurs
 
-| Moteur | driver | feature | Statut |
-|------|--------|---------|------|
-| Mémoire (défaut) | `collection` | intégré | Complet |
-| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | Complet |
-| Meilisearch | `meilisearch` | `meilisearch` | Complet |
-| Typesense | `typesense` | `typesense` | Complet |
-| Algolia | `algolia` | `algolia` | Complet |
-| SQLite | `database` | `database` | Complet |
-| Null (tests / recherche désactivée) | `null` | `null` | Complet |
-| XunSearch | `xunsearch` | `xunsearch` | stub (à implémenter) |
+| Moteur | driver | feature | Transport | État |
+|------|--------|---------|-----------|------|
+| Mémoire (défaut) | `collection` | intégré | In-process | Complet |
+| Elasticsearch / OpenSearch | `elasticsearch` / `opensearch` | `elasticsearch` | HTTP REST | Complet |
+| Meilisearch | `meilisearch` | `meilisearch` | HTTP REST | Complet |
+| Typesense | `typesense` | `typesense` | HTTP REST | Complet |
+| Algolia | `algolia` | `algolia` | HTTP REST | Complet |
+| SQLite | `database` | `database` | Fichier local | Complet |
+| XunSearch | `xunsearch` | `xunsearch` | TCP natif | Complet |
+| Null (tests / recherche désactivée) | `null` | `null` | — | Complet |
 
 Les constructeurs de configuration des autres moteurs sont documentés sur [docs.rs](https://docs.rs/rust-scout) : `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
-> Avec le moteur SQLite (`database`), `total` est compté au niveau SQL (index + préfiltre LIKE grossier) ;
-> après filtrage des wheres / soft delete en mémoire, `hits.len()` peut être inférieur à `total` — la pagination se base sur hits.
+> Pour le moteur SQLite (`database`), `total` est compté au niveau SQL (index + préfiltre LIKE) ;
+> après filtrage des wheres / suppressions logiques en mémoire, `hits.len() < total` est possible,
+> et la pagination se base sur les hits.
 
 ### Champs réservés
 
-`__soft_deleted` est le nom de champ réservé au soft delete (`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`), grâce auquel le moteur filtre les documents supprimés en douceur. Les documents utilisateur **ne doivent pas** utiliser ce nom de champ comme champ métier.
+`__soft_deleted` est le nom de champ réservé utilisé par la suppression logique (`Engine::soft_delete`, `SearchBuilder::with_trashed()` / `only_trashed()`), d'après lequel les moteurs filtrent les documents supprimés logiquement. Les documents utilisateur **ne doivent pas** utiliser ce nom de champ comme champ métier.
 
 ### Gestion des erreurs
 
-Toutes les opérations renvoient `crate::Result<T>`, les erreurs convergent vers un `ScoutError` unique :
+Toutes les opérations renvoient `crate::Result<T>`, les erreurs convergeant vers un `ScoutError` unifié :
 
-- `InvalidIndexName` — nom d'index contenant des espaces / `/` / commençant par `.`, etc. (vérifié avant l'écriture)
-- `InvalidResult` — champ de document n'étant pas un objet JSON
-- `Unsupported` — feature non activé, etc.
-- `Json` — erreur serde
-- `Http` / `Backend` — erreurs réseau et backend du moteur ES (feature activé)
+| Variante | Déclencheur | feature |
+|------|----------|---------|
+| `InvalidIndexName` | nom d'index avec espace / `/` / `\`, commençant par `.`, ou vide (validé avant écriture) | intégré |
+| `InvalidResult` | le champ d'un document n'est pas un objet JSON | intégré |
+| `Unsupported` | feature du pilote désactivée, config requise manquante, ou opération non gérée par le moteur | intégré |
+| `Json` | erreur de sérialisation / désérialisation serde | intégré |
+| `Http` | échec d'une requête HTTP (connexion, timeout, code de statut) | pilotes HTTP |
+| `Sqlx` | erreur SQLite | `database` |
+| `Backend` | le backend a renvoyé une réponse d'erreur, message d'origine transmis | pilotes HTTP / `xunsearch` |
+| `XunSearch` / `XunSearchIo` | échec de parsing du protocole / échec d'E/S TCP | `xunsearch` |
+
+Chaque variante porte une aide au diagnostic — voir [`ScoutError::pet_hint()`](#animal-de-compagnie).
 
 ### Pont vers les modèles métier (Searchable)
 
-Implémentez `Searchable` pour mapper vos structures métier vers des documents indexables, et `SearchableStore` pour encapsuler les trois opérations `index_documents` / `remove_documents` / `search` :
+Implémentez `Searchable` pour mapper une structure métier en document indexable, et `SearchableStore` pour encapsuler les trois opérations `index_documents` / `remove_documents` / `search` :
 
 ```rust
 use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
@@ -257,16 +315,80 @@ impl Searchable for Article {
 }
 ```
 
+## Animal de compagnie
+
+![Animal de compagnie du projet : Scout le chien renifleur](svg/pet.svg)
+
+**Scout · le chien renifleur** (Search Hound) — il renifle les documents, traque les index ;
+partout où il y a une requête, il est déjà là. Version illustrée dans [`svg/pet.svg`](svg/pet.svg) ;
+dans le terminal, il ressemble à ceci :
+
+```console
+$ cargo run --example pet
+```
+
+```
+
+      ___              ___
+     /   \            /   \
+    |     |__________|     |
+    |     /          \     |
+    |    |   o    o   |    |
+    |    |     __     |    |
+    |     \   /  \   /     |
+     \     \  \__/  /     /
+      \     \________/    /
+       \_________________/
+         \   ~~~~~~   /
+          \__________/
+             |    |
+            _|    |_
+           |__|  |__|
+
+
+   ,^.     ,^.     ,^.     ,^.
+
+  Scout · 嗅探猎犬 · rust-scout
+  嗅探文档，追踪索引 —— 哪里有查询，哪里就有它
+```
+
+L'animal vit dans le module [`rust_scout::pet`](../../../src/pet.rs) et **n'ajoute aucune dépendance** :
+
+| Élément | Description |
+|------|-------------|
+| `pet::NAME` / `pet::SPECIES` / `pet::TAGLINE` | informations de la plaque |
+| `pet::ART` | le portrait ASCII (volontairement en 7 bits, il ne se déforme pas dans un terminal CJK) |
+| `pet::banner()` | bannière de terminal ; texte brut sans séquence d'échappement, sûre à journaliser |
+| `pet::hint(&err)` | aide au diagnostic par erreur, renvoie `&'static str` |
+| `pet::format_error(&err)` | erreur d'origine + aide, rendues lisibles par un humain |
+| `ScoutError::pet_hint()` | la même aide, accrochée directement au type d'erreur |
+
+```rust
+use rust_scout::{pet, ScoutError};
+
+println!("{}", pet::banner());
+
+let err = ScoutError::Unsupported("feature manquante".into());
+eprintln!("{}", pet::format_error(&err));
+// error: unsupported operation: feature manquante
+//
+//   [o_o] Scout：这个后端我还没找到路 —— Cargo.toml 里对应的 feature 启用了吗？
+```
+
+> **Pourquoi l'aide n'est-elle pas intégrée à `Display` ?** Le `Display` de `ScoutError` reste
+> sur une seule ligne et lisible par machine — la propagation `?`, la collecte de logs et le grep
+> en CI en dépendent. Pour une sortie lisible contenant l'aide, appelez `pet::format_error()`.
+
 ## Soutien et dons
 
-Si ce projet vous est utile, un don est le bienvenu ☕ — votre soutien fait vivre la maintenance !
+Si ce projet vous aide, un don est le bienvenu ☕ — votre soutien est le moteur d'une maintenance continue !
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="微信打赏" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="支付宝打赏" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="Don par WeChat" width="130" height="130"/>
+<img src="../../../docs/alipay.png" alt="Don par Alipay" width="130" height="130"/>
 
-Scannez le code WeChat · Scannez le code Alipay
+Scannez avec WeChat · Scannez avec Alipay
 
 ### Dons en cryptomonnaies
 
@@ -285,31 +407,31 @@ Scannez le code WeChat · Scannez le code Alipay
 
 ### Virements internationaux (virement bancaire)
 
-**Informations sur le bénéficiaire**
+**Informations du bénéficiaire**
 
 - Nom du bénéficiaire : WANG KEXUN
 - Numéro de compte du bénéficiaire : 881015918251
 
-**Banque du bénéficiaire (ZA Bank)**
+**Banque de réception (ZA Bank)**
 
 - SWIFT Code : `AABLHKHHXXX`
 - Nom de la banque : ZA Bank Limited
 - Code banque : 387
 - Adresse de la banque : Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
 
-> Informations sur la banque correspondante (banque intermédiaire) pour les virements transfrontaliers, et non sur la banque du bénéficiaire. Renseignez-vous auprès de votre banque pour savoir si elles sont requises.
+> Les informations de banque correspondante (banque intermédiaire) ci-dessous concernent les virements transfrontaliers, et non la banque de réception. Demandez à votre banque émettrice si elles sont nécessaires.
 
-- Pour les virements en dollars de Hong Kong, en yuans chinois et en dollars américains, la banque correspondante est **Citibank** :
+- La banque correspondante pour les virements en dollars de Hong Kong, en yuans et en dollars américains est **Citibank** :
   - Nom de la banque : Citibank N.A. Hong Kong
   - SWIFT Code : `CITIHKHXXXX`
   - Code banque : 006 / code agence : 391
   - Nom de l'agence : Hong Kong Branch
   - Adresse de la banque : Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- Pour les virements dans d'autres devises, la banque correspondante est **BNY Mellon** :
+- La banque correspondante pour les virements dans d'autres devises est **BNY Mellon** :
   - Nom de la banque : THE BANK OF NEW YORK MELLON
   - SWIFT Code : `IRVTUS3NXXX`
   - Adresse de la banque : THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## Licence
 
-Licence MIT. Voir [LICENSE](../../../LICENSE).
+Licence MIT. Voir [LICENSE](../../../LICENSE) pour les détails.
