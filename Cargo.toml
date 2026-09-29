@@ -1,13 +1,16 @@
 [package]
 name = "rust-scout"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 description = "Scout-style full-text search engine abstraction for Rust"
 license = "MIT"
 repository = "https://github.com/erikwang2013/rust-scout"
-# 内部 AI 协作配置，不属于发布产物。docs/ 不能排除：README 直接引用
-# docs/svg 的图表与 docs/coin 的打赏二维码，crates.io 上要能渲染出来。
-exclude = ["CLAUDE.md"]
+# 内部 AI 协作配置，不属于发布产物。
+# docs/ 同样排除：crates.io 渲染 README 时会把相对路径改写成 GitHub 的绝对地址
+#（`docs/coin/1.jpg` → `.../raw/HEAD/docs/coin/1.jpg`），从不读取 .crate 内的文件。
+# 这一点已用 crates.io 实际渲染出的 README 验证过，所以随包发 docs/ 没有任何用处：
+# 它占包体积 87%（2.28MB），是每次 cargo add 的纯死重。
+exclude = ["CLAUDE.md", "docs/"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

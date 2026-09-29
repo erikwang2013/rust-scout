@@ -385,11 +385,56 @@
 
     #[tokio::test]
     async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
-        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
-        let err = engine
-            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
-            .await
-            .unwrap_err();
+        // 回归：空 where_in 的短路原先排在 validate_index_name 之前，
+        // within("_all") 会因此返回 Ok(空结果) 而不是 InvalidIndexName。
+        // paginate 上曾留着同一个短路，两个入口必须同行为。
+        let engine = engine_at("http://127.0.0.1:1", "k");
+        let builder = SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new());
+        let err = engine.search(&builder).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.paginate(&builder, 2, 10).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn update_bulk_validates_every_index_name_before_writing() {
+        // 校验必须覆盖**全部**索引名再发第一条请求：按组边校验边写时，一批里混进
+        // 一个保留索引名，合法那组已经落库、调用方却拿到 Err —— 半途写入。stub
+        // 一条响应都不给：任何一次写入尝试都只会以 Http 错误（连接被拒）收场，
+        // 于是「先写后错」在 InvalidIndexName 这条断言下无法蒙混过关。
+        let (url, rx) = stub_server(|_| vec![]);
+        let engine = engine_at(&url, "SECRETKEY");
+        let mut docs: Vec<SearchDocument> = (0..3)
+            .map(|i| {
+                let mut doc =
+                    SearchDocument::new(format!("ok{i}"), serde_json::json!({"title": "x"}))
+                        .unwrap();
+                doc.index = Some(format!("books{i}"));
+                doc
+            })
+            .collect();
+        let mut reserved = SearchDocument::new("bad", serde_json::json!({"title": "x"})).unwrap();
+        reserved.index = Some("_all".to_string());
+        docs.push(reserved);
+
+        let err = engine.update_bulk(&docs).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        assert!(rx.try_recv().is_err(), "一个写入请求都不该发出去");
+    }
+
+    #[tokio::test]
+    async fn empty_id_list_still_validates_the_index_name() {
+        // 回归：`batch` 曾经在空请求列表上直接返回 Ok，校验排在后面，
+        // 于是 delete_in("_all", &[]) 返回 Ok，而其余驱动返回 InvalidIndexName
+        // —— 同一个输入两种答案。地址必然连不上：真发请求会是 Http 错误，
+        // 返回 InvalidIndexName 才说明校验先于 I/O 也先于短路。
+        let engine = engine_at("http://127.0.0.1:1", "k");
+        let empty: &[String] = &[];
+        let err = engine.delete_in("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.delete_bulk("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.soft_delete_in("_all", empty).await.unwrap_err();
         assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
     }
 

@@ -104,6 +104,7 @@ rust-scout/
 │   └── (ユニットテストは各モジュール末尾の #[cfg(test)] mod tests に内蔵)
 ├── tests/                  # 結合テスト（現在は空、テストは src に内蔵）
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search：実行できる検索フロー全体
 │   └── pet.rs              # cargo run --example pet：ペットバナー + エラーヒントのデモ
 └── docs/
     ├── svg/                # プロジェクトのペット + アーキテクチャ / 機能 / 設計 / ライフサイクル図
@@ -130,7 +131,8 @@ rust-scout/
 | XunSearch | ソフト削除は未実装 | `soft_delete` / `soft_delete_in` / `only_trashed` は `Unsupported` を返す |
 | XunSearch | 索引の作成にはフィールド定義の ini が必要 | `create_index` は `Unsupported` を返す（`XunSearchEngine::new` に ini を渡す） |
 | Typesense | 空でない `q` には `query_by` が必須 | `.option("query_by", "field1,field2")` を渡さないとバックエンドは 400 `Parameter \`query_by\` is required` を返す；ドライバはフィールドを推測しない（推測を誤ると順位が黙って変わる） |
-| Meilisearch / Algolia | 書き込みはバックエンドのタスクとして実行される | `update` / `update_bulk` / `delete` / `delete_in` はタスクのエンドポイントを終端状態までポーリングし（上限 30 秒）、失敗したタスクはエラーにする；バッチ書き込みは遅くなるが、データが黙って消えなくなる |
+| Algolia | 書き込みはタスク制：POST が返すのは `taskID` だけで、受理された ≠ 検索可能になった | `update` / `update_bulk` / `delete` / `delete_in` / `delete_bulk` / `soft_delete_in` / `reindex` は `/1/indexes/{index}/task/{taskID}` を `published` までポーリングしてから戻る；30 秒で published にならなければエラー（結果不明を成功とは報告しない） |
+| Meilisearch | 書き込みはタスク制：POST が返すのは `taskUid` だけ | 同じ形で `/tasks/{uid}` を終端状態までポーリング；`failed` / `canceled` のタスクは `Backend` エラーとして返る（以前は失敗した書き込みが成功として黙って捨てられていた）、30 秒で終端に達しなければエラー。バッチ書き込みの所要時間は「バックエンドのタスクが終わるまで」になる |
 | database | `reindex` はコピーではなく**移動** | 元の索引は空になる（`id` がグローバル主キーで、同じ id は二つの索引に存在できない）；元を残したいなら database ドライバを使わないこと |
 | XunSearch | `index: None` は `default` という名前の索引を指すようになった | 他の七つのドライバと同じ；以前は xunsearchd 側の既定データベース `db` に落ちていた —— `index: None` で書いたデータは `index("db")` を渡さないと引けない |
 | 既定件数 | `take` を渡さない場合、collection / database は**すべて**の命中を返す | 残り六つのドライバは既定で **10** 件だけ返す（各バックエンドの慣例的な上限） |
@@ -149,11 +151,13 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # サンプルでのみ必要
 ```
 
 ### 2. 最小サンプル（既定のメモリドライバ）
+
+> コピー＆ペーストではなくそのまま実行するなら：`cargo run --example collection_search` —— 書き込み → クエリ（where + ソート）→ ページング → ソフト削除 → 索引の削除、一連の流れをまるごと、feature も外部サービスも不要。
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -319,6 +323,31 @@ let engine = EngineManager::new(config).engine()?;
 > ページングはすべてメモリで行う。ページングは SQL の `LIMIT/OFFSET` に押し下げられない——
 > そうするとウィンドウ外の一致行を永久に取れなくなる。
 
+### ドライバ設定キー
+
+`ScoutConfig::insert`（または直接 `options` に書いた）のキーを、`EngineManager` がドライバ構築時に読む：
+
+| キー | ドライバ | 説明 |
+|------|----------|---------|
+| `elasticsearch.host` / `opensearch.host` | Elasticsearch / OpenSearch | 既定 `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | Elasticsearch / OpenSearch | 任意 |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | host の既定は `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | host の既定は `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | どちらも必須 |
+| `database.url` | SQLite | 必須 |
+| `database.fields` | SQLite | **検索にはもう関与しない**。互換性のためだけに残しており、次の破壊的リリースで削除予定。以前はテキスト検索を列挙したフィールドだけに限定していたため、同じ入力でも `database` がメモリ側の基準（`collection`）と食い違っていた（`fields=["title"]` + 文書 `{"title":"Rust","tag":"async"}` + クエリ `"async"` → database 0 件、collection 1 件）。現在は文書全体が照合対象になる。空配列を渡すのとキー自体を省くのは同じ |
+| `xunsearch.host` | XunSearch | 既定 `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | 既定 `default` |
+| `xunsearch.ini` | XunSearch | フィールドスキーマ ini のパス。設定しないと `create_index` が `Unsupported` を返し、フィールドの vno は動的な推測に頼るしかないので、設定しておくのが望ましい |
+
+> **タイムアウトはコードに固定**されており、現状は設定できない：HTTP 4 エンジンはリクエスト 30s・接続 10s、Meilisearch / Algolia のタスクポーリングは上限 30s（ポーリング間隔 100ms / 200ms）、XunSearch は 1 回の I/O に 5s、結果ストリーム全体に 20s。
+> なお Elasticsearch の `update_bulk` は約 5MB ごとに切って複数の `_bulk` リクエストを送るため、1 回の呼び出しの総時間は 30s を超えうる —— 30s は**1 リクエスト**の上限であって、バルク操作全体の上限ではない。
+
+> **`options` を読むドライバは 2 つだけ**：Elasticsearch（オブジェクト全体をリクエストボディにそのまま渡す。予約キー `query` / `from` / `size` の 3 つは**エラーになる**——builder の同名設定に上書きされるためで、黙って捨てると未フィルタの結果を渡すことになる。代わりに `.query()` / `.skip()` / `.take()` を使う。`sort` は例外で、`.order_by()` を併用したときだけ拒否され、単独の `option("sort", …)` はそのまま効く）と Typesense（`query_by` のみを読み、`q` が空でないときは必須）。
+> 残り 6 つのドライバは `options` を**読まない**ため、何を渡しても効果はない。こうした「沈黙」を本 crate は記録せずに残さない —— インストール後に気づかせるのではなく、ここに明記しておく。
+
+> **件数だけ、ヒットは不要**：`.take(0)` はどのドライバでも有効で、`hits` は空のまま `total` は絞り込み後の真の件数を返す。「全部で何件か」を行を取らずに問い合わせる方法がこれ。
+
 ### 予約フィールド
 
 `__soft_deleted` はソフト削除機能（`Engine::soft_delete_in`、`SearchBuilder::with_trashed()`
@@ -337,9 +366,9 @@ let engine = EngineManager::new(config).engine()?;
 | `InvalidResult` | 文書のフィールドが JSON オブジェクトでない | 組み込み |
 | `Unsupported` | ドライバに必要な feature が無効、必須設定の欠落、エンジンが未対応の操作 | 組み込み |
 | `Json` | serde のシリアライズ / デシリアライズエラー | 組み込み |
-| `Http` | HTTP リクエストの失敗（接続、タイムアウト、ステータスコード） | HTTP 4 エンジン |
+| `Http` | HTTP の**転送**失敗：接続不可、タイムアウト、TLS、リダイレクト拒否 | HTTP 4 エンジン |
 | `Sqlx` | SQLite のエラー | `database` |
-| `Backend` | バックエンドがエラー応答を返した。元の情報をそのまま透過 | HTTP 4 エンジン / `xunsearch` |
+| `Backend` | バックエンドが非 2xx を返した、または自ら失敗を報告した（ES `timed_out` / シャード失敗、期限までに終端状態に達しなかったタスク）。**HTTP ステータスコードはここ** —— `429` も `400` もこのバリアントに入るので、再試行すべきか決定的かを区別するにはメッセージ本文を解析する必要がある（`Backend` は意図的にそのまま透過させる） | HTTP 4 エンジン / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | プロトコル解析の失敗 / TCP I/O の失敗 | `xunsearch` |
 
 すべてのバリアントが調査ヒントを伴う。詳しくは [`ScoutError::pet_hint()`](#プロジェクトのペット)。

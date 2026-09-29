@@ -236,10 +236,52 @@
     #[tokio::test]
     async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
         let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
-        let err = engine
-            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
-            .await
-            .unwrap_err();
+        let builder = SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new());
+        let err = engine.search(&builder).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.paginate(&builder, 2, 10).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn update_bulk_validates_every_index_name_before_writing() {
+        // 校验必须覆盖**全部**索引名再发第一条请求：按组边校验边 import 时，一批里
+        // 混进一个保留索引名，合法那组已经落库、调用方却拿到 Err —— 半途写入。stub
+        // 一条响应都不给：任何一次写入尝试都只会以 Http 错误（连接被拒）收场，
+        // 于是「先写后错」在 InvalidIndexName 这条断言下无法蒙混过关。
+        let (url, rx) = stub_server(|_| vec![]);
+        let engine = TypesenseEngine::new(url, None);
+        let mut docs: Vec<SearchDocument> = (0..3)
+            .map(|i| {
+                let mut doc =
+                    SearchDocument::new(format!("ok{i}"), serde_json::json!({"title": "x"}))
+                        .unwrap();
+                doc.index = Some(format!("books{i}"));
+                doc
+            })
+            .collect();
+        let mut reserved = SearchDocument::new("bad", serde_json::json!({"title": "x"})).unwrap();
+        reserved.index = Some("_all".to_string());
+        docs.push(reserved);
+
+        let err = engine.update_bulk(&docs).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        assert!(rx.try_recv().is_err(), "一个写入请求都不该发出去");
+    }
+
+    #[tokio::test]
+    async fn empty_id_list_still_validates_the_index_name() {
+        // 钉住顺序：空 id 列表的短路排在 validate_index_name **之后**，与其余
+        // 七个驱动的同一输入同行为（`_all` 必须报 InvalidIndexName，不是 Ok）。
+        // 地址必然连不上：真发请求会是 Http 错误，返回 InvalidIndexName 才说明
+        // 校验先于 I/O 也先于短路。
+        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
+        let empty: &[String] = &[];
+        let err = engine.delete_in("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.delete_bulk("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.soft_delete_in("_all", empty).await.unwrap_err();
         assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
     }
 

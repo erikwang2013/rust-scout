@@ -232,6 +232,9 @@ pub fn validate_field_name(field: &str) -> crate::Result<()> {
 /// 不直接 `Policy::none()` 是因为那会连反向代理的正常重定向（补尾斜杠、
 /// 同源跳转）一起掐掉；限同源既堵了泄漏又留住正常用法。
 ///
+/// **公开**给自建驱动的使用者：reqwest 默认策略会带着自定义认证头跟到别的
+/// host，自己写 HTTP 驱动的必须显式设置这个策略，否则就复现了这个漏洞。
+///
 /// 「同源」按 scheme + host + port 三元组全等判定，三个都不能省：
 /// 只比 host 会放过 `127.0.0.1:8080` → `127.0.0.1:9090`（端口不同）；
 /// 不比 scheme 会放过 `https://h:8080` → `http://h:8080` —— 那是**明文降级**，
@@ -242,7 +245,7 @@ pub fn validate_field_name(field: &str) -> crate::Result<()> {
     feature = "typesense",
     feature = "algolia"
 ))]
-pub(crate) fn same_origin_redirect_policy() -> reqwest::redirect::Policy {
+pub fn same_origin_redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         match attempt.previous().first() {
             Some(first) if same_origin(first, attempt.url()) => attempt.follow(),
@@ -269,13 +272,16 @@ fn same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
 /// RFC 3986 路径段百分号编码：仅保留 unreserved 字符，其余逐字节转 `%XX`
 /// （含 UTF-8 多字节）。所有 HTTP 引擎的 index/id 进入 URL 前统一编码，
 /// 防止 `?`/`#`/`&` 截断路径与 `%2F` 绕过 `/` 校验。
+///
+/// **公开**给自建驱动的使用者：自己拼 URL 而漏了这一步，等于绕过 `/` 校验——
+/// 而 `/` 正是 [`validate_index_name`] 拦住多索引表达式的那道门。
 #[cfg(any(
     feature = "elasticsearch",
     feature = "meilisearch",
     feature = "typesense",
     feature = "algolia"
 ))]
-pub(crate) fn percent_encode(s: &str) -> String {
+pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {

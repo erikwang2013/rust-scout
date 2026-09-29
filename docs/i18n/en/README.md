@@ -108,6 +108,7 @@ rust-scout/
 │   └── (unit tests are inlined per module under #[cfg(test)] mod tests)
 ├── tests/                  # integration tests (currently empty; tests live in src)
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search: runnable end-to-end search flow
 │   └── pet.rs              # cargo run --example pet: pet banner + error-hint demo
 └── docs/
     ├── svg/                # pet + architecture / features / design / lifecycle diagrams
@@ -175,11 +176,13 @@ A few more deliberate semantic alignments:
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # example only; the meilisearch / algolia task polling also needs tokio's timer
 ```
 
 ### 2. Minimal example (default in-memory driver)
+
+> Rather than copy-paste, just run it: `cargo run --example collection_search` — write → query (where + sorting) → paginate → soft delete → delete index, the whole chain, zero features, zero external services.
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -352,6 +355,31 @@ Config constructors for the remaining engines are documented on [docs.rs](https:
 
 > For the SQLite engine (`database`), `total` is the **post-filter** hit count, matching `CollectionEngine`: SQL only does the index + LIKE coarse pass to fetch candidates, then wheres / soft deletes / sorting / pagination all happen in memory. Pagination cannot be pushed down into SQL `LIMIT/OFFSET` — that would make matching rows outside the window permanently unreachable.
 
+### Driver Config Keys
+
+Keys in `ScoutConfig::insert` (or written straight into `options`) are read by `EngineManager` when it builds the driver:
+
+| Key | Driver | Notes |
+|---------|--------------|---------|
+| `elasticsearch.host` / `opensearch.host` | Elasticsearch / OpenSearch | defaults to `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | Elasticsearch / OpenSearch | optional |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | host defaults to `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | host defaults to `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | both required |
+| `database.url` | SQLite | required |
+| `database.fields` | SQLite | **no longer participates in search**, kept only for backward compatibility (and slated for removal in the next breaking release). It used to restrict text search to the listed fields, which made `database` disagree with the in-memory baseline (`collection`) on the same input (`fields=["title"]` + doc `{"title":"Rust","tag":"async"}` + query `"async"` → database 0 hits, collection 1); matching now covers the whole document. An empty array and omitting the key behave the same |
+| `xunsearch.host` | XunSearch | defaults to `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | defaults to `default` |
+| `xunsearch.ini` | XunSearch | path to the field-scheme ini. Without it `create_index` returns `Unsupported` and field vnos can only be guessed dynamically, so configuring it is recommended |
+
+> **Timeouts are hard-coded** and currently not configurable: the four HTTP engines use 30s per request and 10s to connect; Meilisearch / Algolia task polling is capped at 30s (poll intervals 100ms / 200ms); XunSearch allows 5s per I/O and 20s for the whole result stream.
+> Note that Elasticsearch's `update_bulk` chunks at roughly 5MB into multiple `_bulk` requests, so a single call can take longer than 30s — the 30s is a **per-request** limit, not a limit on the whole bulk operation.
+
+> **`options` is only read by two drivers**: Elasticsearch (the whole object is passed through into the request body; the three reserved keys `query` / `from` / `size` **error out** — they would be overwritten by the builder's same-named settings, and silently dropping them would hand you unfiltered results, so use `.query()` / `.skip()` / `.take()` instead. `sort` is the exception: it is rejected only when you also use `.order_by()`, so a lone `option("sort", …)` still applies as-is) and Typesense (only `query_by`, which is required whenever `q` is non-empty).
+> The other six drivers **do not read** `options`; anything passed there has no effect. That is exactly the kind of silence this crate refuses to leave undocumented — hence this explicit note, rather than letting you find out after installing it.
+
+> **Count only, no hits**: `.take(0)` is valid on every driver — it returns an empty `hits` while `total` stays the true post-filter count, which makes it the way to ask "how many match" without fetching rows.
+
 ### Reserved Fields
 
 `__soft_deleted` is the reserved field name used by the soft-delete feature (`Engine::soft_delete_in`, `SearchBuilder::with_trashed()` / `only_trashed()`), which engines use to filter out soft-deleted documents. User documents **should not** use this field name as a business field.
@@ -368,9 +396,9 @@ All operations return `crate::Result<T>`, with errors converging into the unifie
 | `InvalidResult` | document field is not a JSON object | built-in |
 | `Unsupported` | driver's feature is off, required config missing, or the engine does not support the operation | built-in |
 | `Json` | serde serialization / deserialization error | built-in |
-| `Http` | HTTP request failed (connect, timeout, status) | HTTP drivers |
+| `Http` | HTTP **transport** failure: cannot connect, timeout, TLS, redirect refused | HTTP drivers |
 | `Sqlx` | SQLite error | `database` |
-| `Backend` | backend returned an error response; original message passed through | HTTP drivers / `xunsearch` |
+| `Backend` | the backend returned a non-2xx response, or reported a failure itself (ES `timed_out` / failed shards, a task that never reached a terminal state). **HTTP status codes live here** — both `429` and `400` land in this variant, so telling retryable apart from terminal means parsing the message text (which `Backend` deliberately passes through verbatim) | HTTP drivers / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | protocol parse failure / TCP I/O failure | `xunsearch` |
 
 Every variant carries a troubleshooting hint — see [`ScoutError::pet_hint()`](#project-pet).

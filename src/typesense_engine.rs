@@ -212,8 +212,13 @@ impl Engine for TypesenseEngine {
             for doc in docs {
                 groups.entry(doc.index.as_deref().unwrap_or("default")).or_default().push(doc);
             }
-            for (index, docs) in groups {
+            // 校验全部索引名先于第一条请求：按组边校验边 import 时，{合法索引,
+            // 保留索引} 的一批会先把合法那组写进去再报错，调用方拿到 Err 时数据
+            // 已经落了一半 —— 与 delete_in 同一条契约：校验是第一个能失败的东西。
+            for index in groups.keys() {
                 crate::validate_index_name(index)?;
+            }
+            for (index, docs) in groups {
                 self.import_docs(index, &docs).await?;
             }
             Ok(())

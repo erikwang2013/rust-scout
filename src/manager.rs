@@ -143,8 +143,14 @@ fn build_engine(config: &ScoutConfig) -> crate::Result<Arc<dyn Engine>> {
                 .and_then(|value| value.as_str())
                 .unwrap_or("default")
                 .to_string();
+            // 字段方案 ini。此前这里恒传 None，于是经 EngineManager 建出来的
+            // XunSearch 引擎永远拿不到方案：create_index 直接 Unsupported，
+            // 字段 vno 只能靠动态猜测，而 README 推荐的正是走 manager 这条路。
+            let ini_path = config
+                .get("xunsearch.ini")
+                .and_then(|value| value.as_str());
             Ok(Arc::new(crate::xunsearch_engine::XunSearchEngine::new(
-                &host, &project, None,
+                &host, &project, ini_path,
             )))
         }
         "collection" => Ok(Arc::new(CollectionEngine::new())),

@@ -101,6 +101,7 @@ rust-scout/
 │   └── (testes unitários inline em cada módulo, em #[cfg(test)] mod tests)
 ├── tests/                  # testes de integração (vazios por agora; os testes vivem em src)
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search: fluxo de pesquisa completo e executável
 │   └── pet.rs              # cargo run --example pet: faixa da mascote + demo das sugestões
 └── docs/
     ├── svg/                # mascote + diagramas de arquitetura / funcionalidades / design / ciclo
@@ -127,7 +128,8 @@ fazer algo, ele **diz isso explicitamente** em vez de devolver em silêncio resu
 | XunSearch | Eliminação lógica não implementada | `soft_delete` / `soft_delete_in` / `only_trashed` devolvem `Unsupported` |
 | XunSearch | Criar um índice exige um ini de esquema de campos | `create_index` devolve `Unsupported` (passe um ini a `XunSearchEngine::new`) |
 | Typesense | Um `q` não vazio exige `query_by` | sem `.option("query_by", "campo1,campo2")` o backend responde 400 `Parameter \`query_by\` is required`; o driver não adivinha nenhum campo (um palpite errado mudaria a ordem em silêncio) |
-| Meilisearch / Algolia | As escritas correm como tarefa (task) do backend | `update` / `update_bulk` / `delete` / `delete_in` consultam o endpoint de tarefas até ao estado final (limite de 30 s) e devolvem erro se a tarefa falhar; a escrita em lote fica mais lenta, mas deixa de perder dados em silêncio |
+| Algolia | As escritas correm como tarefa: um POST devolve apenas `taskID`, e aceite ≠ indexado | `update` / `update_bulk` / `delete` / `delete_in` / `delete_bulk` / `soft_delete_in` / `reindex` consultam `/1/indexes/{index}/task/{taskID}` até `published` antes de devolver; sem publicação em 30 s, erro (um resultado desconhecido nunca é dado como sucesso) |
+| Meilisearch | As escrituras correm como tarefa: um POST devolve apenas `taskUid` | mesma forma, consultando `/tasks/{uid}` até ao estado final; uma tarefa `failed` / `canceled` passa a devolver um erro `Backend` (antes, uma escrita falhada era descartada em silêncio como sucesso), e 30 s sem estado final é erro. A escrita em lote passa a custar «o tempo da tarefa do backend» |
 | database | `reindex` **move** em vez de copiar | o índice de origem fica vazio (`id` é a chave primária global, o mesmo id não pode estar em dois índices); se precisar de manter a origem, não use o driver database |
 | XunSearch | `index: None` passa a significar o índice chamado `default` | como nos outros sete drivers; antes caía na base de dados predefinida do servidor xunsearchd (`db`) — os dados escritos com `index: None` só se encontram passando `index("db")` |
 | Tamanho de página predefinido | Sem `take`, collection / database devolvem **todos** os hits | os outros seis drivers devolvem **10** por predefinição (limite habitual do seu backend) |
@@ -147,11 +149,13 @@ Dois alinhamentos semânticos deliberados:
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # apenas para o exemplo
 ```
 
 ### 2. Exemplo mínimo (driver em memória, o padrão)
+
+> Em vez de copiar e colar, execute-o diretamente: `cargo run --example collection_search` — escrita → consulta (where + ordenação) → paginação → eliminação lógica → eliminação do índice, a cadeia toda, zero features, zero serviços externos.
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -320,6 +324,31 @@ Os construtores de configuração dos restantes engines estão em [docs.rs](http
 > pode ser delegada ao `LIMIT/OFFSET` do SQL — as linhas correspondentes fora da janela
 > ficariam inalcançáveis para sempre.
 
+### Chaves de Configuração dos Drivers
+
+As chaves em `ScoutConfig::insert` (ou escritas diretamente em `options`) são lidas pelo `EngineManager` ao construir o driver:
+
+| Chave | Driver | Descrição |
+|------|----------|---------|
+| `elasticsearch.host` / `opensearch.host` | Elasticsearch / OpenSearch | predefinição `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | Elasticsearch / OpenSearch | opcional |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | host por omissão `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | host por omissão `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | ambas obrigatórias |
+| `database.url` | SQLite | obrigatória |
+| `database.fields` | SQLite | **já não participa na pesquisa**, mantida apenas por compatibilidade (e destinada a desaparecer na próxima versão disruptiva). Antes restringia a pesquisa textual aos campos listados, o que fazia o `database` divergir da base em memória (`collection`) para a mesma entrada (`fields=["title"]` + documento `{"title":"Rust","tag":"async"}` + consulta `"async"` → database 0 hits, collection 1); agora a correspondência abrange o documento inteiro. Um array vazio e a omissão da chave comportam-se da mesma forma |
+| `xunsearch.host` | XunSearch | predefinição `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | predefinição `default` |
+| `xunsearch.ini` | XunSearch | caminho para o ini do esquema de campos. Sem ele, `create_index` devolve `Unsupported` e os vno dos campos só podem ser adivinhados dinamicamente, pelo que é recomendável configurá-lo |
+
+> **Os timeouts estão fixos no código**, não são configuráveis por agora: os quatro motores HTTP usam 30s por pedido e 10s de ligação; o polling de tarefas de Meilisearch / Algolia está limitado a 30s (intervalos de 100ms / 200ms); o XunSearch permite 5s por I/O e 20s para todo o fluxo de resultados.
+> Note-se que o `update_bulk` do Elasticsearch corta a cerca de 5MB em vários pedidos `_bulk`, pelo que uma chamada pode demorar mais de 30s — os 30s são um limite **por pedido**, não da operação em bloco inteira.
+
+> **O `options` só é lido por dois drivers**: o Elasticsearch (o objeto inteiro é passado para o corpo do pedido; as três chaves reservadas `query` / `from` / `size` **dão erro** — seriam substituídas pelas definições homónimas do builder, e descartá-las em silêncio entregar-lhe-ia resultados não filtrados; use antes `.query()` / `.skip()` / `.take()`. O `sort` é a exceção: só é rejeitado quando também usa `.order_by()`, pelo que um `option("sort", …)` isolado continua a aplicar-se tal como está) e o Typesense (apenas `query_by`, obrigatório sempre que `q` não esteja vazio).
+> Os outros seis drivers **não leem** o `options`; o que lá for posto não terá efeito nenhum. É exatamente este silêncio que esta crate se recusa a deixar por documentar — daí estar aqui dito de forma explícita, em vez de o descobrir depois de instalar.
+
+> **Só a contagem, sem hits**: o `.take(0)` é válido em todos os drivers — devolve `hits` vazio mas o `total` mantém-se a contagem real após filtragem, pelo que é assim que se pergunta «quantos correspondem» sem trazer linhas.
+
 ### Campos Reservados
 
 `__soft_deleted` é o nome de campo reservado usado pela eliminação lógica (`Engine::soft_delete_in`,
@@ -338,9 +367,9 @@ Todas as operações devolvem `crate::Result<T>`, com os erros a convergir no `S
 | `InvalidResult` | campo do documento que não é um objeto JSON | integrada |
 | `Unsupported` | feature do driver desligada, configuração obrigatória em falta, ou engine que não suporta a operação | integrada |
 | `Json` | erro de serialização / desserialização serde | integrada |
-| `Http` | pedido HTTP falhado (ligação, tempo limite, estado) | quatro drivers HTTP |
+| `Http` | falha de **transporte** HTTP: não liga, tempo limite, TLS, redireccionamento recusado | quatro drivers HTTP |
 | `Sqlx` | erro do SQLite | `database` |
-| `Backend` | o backend devolveu uma resposta de erro; mensagem original repassada | quatro drivers HTTP / `xunsearch` |
+| `Backend` | o backend devolveu uma resposta não-2xx, ou reportou uma falha própria (ES `timed_out` / shards falhados, uma tarefa que nunca atingiu um estado terminal). **Os códigos de estado HTTP estão aqui** — tanto `429` como `400` caem nesta variante, portanto distinguir o repetível do terminal obriga a interpretar o texto da mensagem (o `Backend` repassa-a de propósito tal como está) | quatro drivers HTTP / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | falha ao interpretar o protocolo / falha de I/O TCP | `xunsearch` |
 
 Cada variante traz uma sugestão de diagnóstico — ver [`ScoutError::pet_hint()`](#mascote-do-projeto).

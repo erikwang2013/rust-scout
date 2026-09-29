@@ -60,20 +60,21 @@
     }
 
     #[tokio::test]
-    async fn invalid_project_fails_before_any_packet_is_sent() {
+    async fn invalid_project_fails_before_any_connection() {
+        // 校验先于 I/O：非法项目名不但不该发 CMD_USE，连 connect 都不该建立 —— 校验
+        // 原先挂在握手之后，后端挂着时先撞上的是 XunSearchIo，不是 InvalidIndexName。
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let mut buf = [0u8; 1];
-            // 校验失败必须在写包之前返回：连接被放弃，读到 EOF(0) 而不是 CMD_USE(1)。
-            assert_eq!(sock.read(&mut buf).await.unwrap_or(0), 0, "非法项目名不得发出 CMD_USE");
-        });
         // new() 把给定端口当 index 端口、search 取 port+1；监听器开在 search 端口上。
         let engine = XunSearchEngine::new(&format!("127.0.0.1:{}", addr.port() - 1), "../../other_project", None);
         let err = engine.search(&SearchBuilder::new("q")).await.expect_err("非法项目名必须报错");
         assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
-        server.await.unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept())
+                .await
+                .is_err(),
+            "非法项目名不得建立连接"
+        );
     }
 
     #[tokio::test]
@@ -146,15 +147,107 @@
         );
     }
 
+    /// 后端不可达（127.0.0.1:1 拒绝连接）：真去连就必然失败。库名校验必须排在
+    /// connect 之前，否则这里拿到的是 XunSearchIo ——「名字非法」不该要看后端脸色，
+    /// 其余七个驱动对同一个输入一律 InvalidIndexName。
+    fn dead_backend() -> XunSearchEngine {
+        XunSearchEngine::new("127.0.0.1:1", "proj", None)
+    }
+
+    fn doc_in(id: &str, index: &str) -> SearchDocument {
+        let mut doc = SearchDocument::new(id, serde_json::json!({"title": "x"})).unwrap();
+        doc.index = Some(index.to_string());
+        doc
+    }
+
     #[tokio::test]
     async fn flush_validates_the_index_name_before_connecting() {
         // 回归：flush 原先忽略 _index（既不过滤也不校验），flush("_all") 会静默成功。
         // 其余驱动都会先过 validate_index_name，这里必须一致。
-        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
-        let err = engine.flush("_all").await.unwrap_err();
+        let err = dead_backend().flush("_all").await.unwrap_err();
         assert!(
             matches!(err, crate::ScoutError::InvalidIndexName(_)),
             "_all 必须在连接之前被拒，得到 {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn search_rejects_reserved_index_before_connecting() {
+        let err = dead_backend().search(&SearchBuilder::new("q").within("_all")).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        // 空 where_in 的短路排在 I/O 之前，但不能排在库名校验之前
+        let err = dead_backend()
+            .search(&SearchBuilder::new("q").within("_all").where_in("tag", Vec::<&str>::new()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn paginate_rejects_reserved_index_before_connecting() {
+        let err = dead_backend()
+            .paginate(&SearchBuilder::new("q").within("_all"), 1, 10)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_in_rejects_reserved_index_before_connecting() {
+        let ids = vec!["one".to_string()];
+        let err = dead_backend().delete_in("_all", &ids).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_in_rejects_reserved_index_with_empty_ids() {
+        // 空 id 短路原先排在库名校验之前，`delete_in("_all", &[])` 直接返回 Ok
+        let err = dead_backend().delete_in("_all", &[]).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_bulk_rejects_reserved_index_before_connecting() {
+        let ids = vec!["one".to_string()];
+        let err = dead_backend().delete_bulk("_all", &ids).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_bulk_rejects_reserved_index_with_empty_ids() {
+        let err = dead_backend().delete_bulk("_all", &[]).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_index_rejects_reserved_index_before_connecting() {
+        let err = dead_backend().delete_index("_all").await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn update_rejects_reserved_doc_index_before_connecting() {
+        // update/update_bulk 的库名来自 doc.index：分组是纯计算，校验跟着一起前置
+        let docs = [doc_in("one", "_all")];
+        let err = dead_backend().update(&docs).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = dead_backend().update_bulk(&docs).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn create_index_rejects_reserved_index_against_both_branches() {
+        // 无 ini 时是 Unsupported；保留名必须排在它前面（各驱动一致）
+        let err = dead_backend().create_index("_all", serde_json::json!({})).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+
+        // 有 ini 时它本是 no-op（Ok）—— 保留名不能因此静默通过
+        let ini = std::env::temp_dir().join(format!("rust_scout_xunsearch_{}.ini", std::process::id()));
+        std::fs::write(&ini, "[pid]\ntype = id\n\n[title]\ntype = string\nindex = both\n").unwrap();
+        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", Some(ini.to_str().unwrap()));
+        let err = engine.create_index("_all", serde_json::json!({})).await.unwrap_err();
+        let _ = std::fs::remove_file(&ini);
+        assert!(engine.has_ini, "临时 ini 未被解析，这条用例没测到 no-op 分支");
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
     }
 

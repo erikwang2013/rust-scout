@@ -281,11 +281,15 @@ impl AlgoliaEngine {
     }
 
     /// batch 端点；requests 为空则跳过。响应带 `taskID`，等它发布才算写完。
+    ///
+    /// 校验排在空列表短路之前：`delete_in`/`delete_bulk`/`soft_delete_in` 都从这里
+    /// 下发，短路在前时 `delete_in("_all", &[])` 返回 Ok，而其余驱动返回
+    /// InvalidIndexName —— 同一个输入两种答案。
     async fn batch(&self, index: &str, requests: Vec<Value>) -> crate::Result<()> {
+        crate::validate_index_name(index)?;
         if requests.is_empty() {
             return Ok(());
         }
-        crate::validate_index_name(index)?;
         let path = format!("/1/indexes/{}/batch", percent_encode(index));
         let body = serde_json::json!({"requests": requests});
         let task = self.request(reqwest::Method::POST, &path, Some(body)).await?;
@@ -349,13 +353,17 @@ impl Engine for AlgoliaEngine {
     ) -> EngineFuture<'a, SearchResult> {
         let per_page = per_page.max(1);
         let offset = Self::page_offset(page, per_page); // 页 N → 第 (N-1)*per_page 条
+        // 索引名校验先于短路，理由同 search：否则 within("_all") 配空 where_in 会
+        // 返回 Ok(空结果) 而不是 InvalidIndexName —— 两个入口必须同行为。
+        let index = builder.index.as_deref().unwrap_or("default");
+        if let Err(e) = crate::validate_index_name(index) {
+            return Box::pin(async move { Err(e) });
+        }
         // 空 where_in 集合 = 不匹配任何（Collection 语义）：短路空结果。
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
         }
         Box::pin(async move {
-            let index = builder.index.as_deref().unwrap_or("default");
-            crate::validate_index_name(index)?;
             let body = Self::search_body(builder, offset, per_page)?;
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
@@ -440,6 +448,13 @@ impl Engine for AlgoliaEngine {
                     .entry(doc.index.as_deref().unwrap_or("default"))
                     .or_default()
                     .push(Self::doc_to_record(doc));
+            }
+            // 校验全部索引名先于第一条请求：按组边校验边 batch 时，{合法索引,
+            // 保留索引} 的一批会先把合法那组写进去再报错，调用方拿到 Err 时数据
+            // 已经落了一半。`batch` 自己也校验（delete_in/soft_delete_in 依赖它），
+            // 这里只为保证「任何一组非法 => 一个写入请求都不发」。
+            for index in groups.keys() {
+                crate::validate_index_name(index)?;
             }
             for (index, records) in groups {
                 let requests: Vec<Value> = records

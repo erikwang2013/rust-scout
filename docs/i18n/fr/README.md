@@ -101,6 +101,7 @@ rust-scout/
 │   └── (les tests unitaires sont en ligne dans chaque module sous #[cfg(test)] mod tests)
 ├── tests/                  # tests d'intégration (vides pour l'instant ; les tests sont dans src)
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search : flux de recherche complet et exécutable
 │   └── pet.rs              # cargo run --example pet : bannière + démo des aides d'erreur
 └── docs/
     ├── svg/                # animal + schémas architecture / fonctionnalités / conception / cycle de vie
@@ -128,7 +129,8 @@ résultats faux :
 | XunSearch | Suppression logique non implémentée | `soft_delete` / `soft_delete_in` / `only_trashed` renvoient `Unsupported` |
 | XunSearch | Créer un index exige un ini de schéma de champs | `create_index` renvoie `Unsupported` (passez un ini à `XunSearchEngine::new`) |
 | Typesense | Un `q` non vide exige `query_by` | sans `.option("query_by", "champ1,champ2")` le backend répond 400 `Parameter \`query_by\` is required` ; le pilote ne devine aucun champ (un mauvais choix changerait l'ordre en silence) |
-| Meilisearch / Algolia | Les écritures passent par une tâche (task) du backend | `update` / `update_bulk` / `delete` / `delete_in` interrogent l'endpoint des tâches jusqu'à l'état final (plafond de 30 s) et renvoient une erreur si la tâche échoue ; l'écriture en lot devient plus lente, mais plus rien n'est perdu en silence |
+| Algolia | Les écritures passent par une tâche : un POST ne renvoie que `taskID`, et accepté ≠ indexé | `update` / `update_bulk` / `delete` / `delete_in` / `delete_bulk` / `soft_delete_in` / `reindex` interrogent `/1/indexes/{index}/task/{taskID}` jusqu'à `published` avant de rendre la main ; pas de publication en 30 s = erreur (un résultat inconnu n'est jamais annoncé comme un succès) |
+| Meilisearch | Les écritures passent par une tâche : un POST ne renvoie que `taskUid` | même forme, en interrogeant `/tasks/{uid}` jusqu'à l'état final ; une tâche `failed` / `canceled` renvoie désormais une erreur `Backend` (avant, une écriture échouée était silencieusement jetée comme un succès), et 30 s sans état final est une erreur. L'écriture en lot coûte donc « la durée de la tâche du backend » |
 | database | `reindex` **déplace** au lieu de copier | l'index source est vidé (`id` est la clé primaire globale, un même id ne peut pas exister dans deux index) ; si vous devez garder la source, n'utilisez pas le pilote database |
 | XunSearch | `index: None` désigne désormais l'index nommé `default` | comme pour les sept autres pilotes ; auparavant cela retombait sur la base par défaut du serveur xunsearchd (`db`) — les données écrites avec `index: None` ne se retrouvent qu'avec `index("db")` |
 | Taille de page par défaut | Sans `take`, collection / database renvoient **tous** les hits | les six autres pilotes renvoient **10** par défaut (plafond habituel de leur backend) |
@@ -148,11 +150,13 @@ Deux alignements sémantiques délibérés :
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # exemple uniquement
 ```
 
 ### 2. Exemple minimal (pilote mémoire par défaut)
+
+> Plutôt que copier-coller, lancez-le directement : `cargo run --example collection_search` — écriture → requête (where + tri) → pagination → suppression logique → suppression d'index, toute la chaîne, zéro feature, zéro service externe.
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -319,6 +323,31 @@ Les constructeurs de configuration des autres moteurs sont documentés sur [docs
 > être poussée dans le `LIMIT/OFFSET` SQL — les lignes correspondantes hors fenêtre seraient
 > alors définitivement inaccessibles.
 
+### Clés de configuration des pilotes
+
+Ces clés, placées dans `ScoutConfig::insert` (ou écrites directement dans `options`), sont lues par `EngineManager` au moment de construire le pilote :
+
+| Clé | Pilote | Description |
+|------|----------|---------|
+| `elasticsearch.host` / `opensearch.host` | Elasticsearch / OpenSearch | par défaut `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | Elasticsearch / OpenSearch | facultative |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | hôte par défaut `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | hôte par défaut `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | les deux obligatoires |
+| `database.url` | SQLite | obligatoire |
+| `database.fields` | SQLite | **ne participe plus à la recherche**, conservée uniquement pour la compatibilité (et vouée à disparaître à la prochaine version majeure). Elle limitait auparavant la recherche textuelle aux champs énumérés, ce qui faisait diverger `database` de la référence en mémoire (`collection`) pour une même entrée (`fields=["title"]` + document `{"title":"Rust","tag":"async"}` + requête `"async"` → database 0 hit, collection 1) ; le document entier participe désormais à la correspondance. Un tableau vide et l'omission de la clé se comportent de la même façon |
+| `xunsearch.host` | XunSearch | par défaut `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | par défaut `default` |
+| `xunsearch.ini` | XunSearch | chemin de l'ini du schéma de champs. Sans lui, `create_index` renvoie `Unsupported` et les vno des champs ne peuvent être que devinés dynamiquement : mieux vaut le renseigner |
+
+> **Les timeouts sont codés en dur** et ne sont pas configurables pour l'instant : les quatre moteurs HTTP à 30s par requête et 10s de connexion ; le polling des tâches Meilisearch / Algolia plafonne à 30s (intervalles de 100ms / 200ms) ; XunSearch autorise 5s par E/S et 20s pour tout le flux de résultats.
+> Attention : `update_bulk` d'Elasticsearch découpe à partir d'environ 5MB en plusieurs requêtes `_bulk`, donc un appel peut dépasser 30s au total — les 30s sont une limite **par requête**, pas pour l'opération groupée entière.
+
+> **`options` n'est lu que par deux pilotes** : Elasticsearch (l'objet entier est versé dans le corps de la requête ; les trois clés réservées `query` / `from` / `size` **déclenchent une erreur** — elles seraient écrasées par les réglages homonymes du builder, et les écarter en silence vous livrerait des résultats non filtrés ; utilisez plutôt `.query()` / `.skip()` / `.take()`. `sort` fait exception : il n'est rejeté que si vous utilisez aussi `.order_by()`, un `option("sort", …)` seul reste donc appliqué tel quel) et Typesense (uniquement `query_by`, obligatoire dès que `q` n'est pas vide).
+> Les six autres pilotes **ne lisent pas** `options` : ce qui y est passé n'aura aucun effet. C'est exactement le genre de silence que cette crate refuse de laisser non documenté — d'où cette mention explicite, plutôt que de vous laisser le découvrir après installation.
+
+> **Le compte seul, sans hits** : `.take(0)` est valide sur tous les pilotes — `hits` revient vide mais `total` reste le vrai décompte après filtrage, ce qui en fait le moyen de demander « combien de résultats » sans rapatrier de lignes.
+
 ### Champs réservés
 
 `__soft_deleted` est le nom de champ réservé utilisé par la suppression logique (`Engine::soft_delete_in`, `SearchBuilder::with_trashed()` / `only_trashed()`), d'après lequel les moteurs filtrent les documents supprimés logiquement. Les documents utilisateur **ne doivent pas** utiliser ce nom de champ comme champ métier.
@@ -335,9 +364,9 @@ Toutes les opérations renvoient `crate::Result<T>`, les erreurs convergeant ver
 | `InvalidResult` | le champ d'un document n'est pas un objet JSON | intégré |
 | `Unsupported` | feature du pilote désactivée, config requise manquante, ou opération non gérée par le moteur | intégré |
 | `Json` | erreur de sérialisation / désérialisation serde | intégré |
-| `Http` | échec d'une requête HTTP (connexion, timeout, code de statut) | pilotes HTTP |
+| `Http` | échec du **transport** HTTP : connexion impossible, timeout, TLS, redirection refusée | pilotes HTTP |
 | `Sqlx` | erreur SQLite | `database` |
-| `Backend` | le backend a renvoyé une réponse d'erreur, message d'origine transmis | pilotes HTTP / `xunsearch` |
+| `Backend` | le backend a renvoyé une réponse non-2xx, ou a signalé lui-même un échec (ES `timed_out` / shards en échec, tâche jamais parvenue à un état terminal). **Les codes de statut HTTP sont ici** — `429` comme `400` tombent dans cette variante, donc distinguer le réessayable du définitif impose d'analyser le texte du message (`Backend` le transmet volontairement tel quel) | pilotes HTTP / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | échec de parsing du protocole / échec d'E/S TCP | `xunsearch` |
 
 Chaque variante porte une aide au diagnostic — voir [`ScoutError::pet_hint()`](#animal-de-compagnie).

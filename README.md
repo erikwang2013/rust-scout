@@ -108,6 +108,7 @@ rust-scout/
 │   └── (单元测试内联在各模块底部 #[cfg(test)] mod tests)
 ├── tests/                  # 集成测试（当前为空，测试内联在 src）
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search：可运行的搜索全流程
 │   └── pet.rs              # cargo run --example pet：宠物横幅 + 错误提示演示
 └── docs/
     ├── svg/                # 项目宠物 + 架构 / 功能 / 设计 / 生命周期图
@@ -166,11 +167,13 @@ rust-scout/
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # 示例需要；meilisearch / algolia 的任务轮询也依赖 tokio 定时器
 ```
 
 ### 2. 最小示例（默认内存驱动）
+
+> 想直接跑而不是复制粘贴：`cargo run --example collection_search` —— 写入 → 查询（where + 排序）→ 分页 → 软删除 → 清空索引，一整条链路，零 feature、零外部服务。
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -334,6 +337,31 @@ let engine = EngineManager::new(config).engine()?;
 
 其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
+### 驱动配置键
+
+`ScoutConfig::insert`（或直接写 `options`）里的键，由 `EngineManager` 构造驱动时读取：
+
+| 键 | 驱动 | 说明 |
+|------|------|------|
+| `elasticsearch.host` / `opensearch.host` | ES / OpenSearch | 缺省 `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | ES / OpenSearch | 可选 |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | host 缺省 `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | host 缺省 `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | 均必填 |
+| `database.url` | SQLite | 必填 |
+| `database.fields` | SQLite | **已不参与搜索**，仅为兼容保留（待下个 breaking 版本连同构造参数一起删）。早期用它限定文本搜索只覆盖列出的字段，导致 database 与内存基准（`collection`）对同一输入给出不同结果（`fields=["title"]` + 文档 `{"title":"Rust","tag":"async"}` + 查 `"async"` → database 0 条、collection 1 条）；现已改为整份文档参与匹配。传空数组或不传都一样 |
+| `xunsearch.host` | XunSearch | 缺省 `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | 缺省 `default` |
+| `xunsearch.ini` | XunSearch | 字段方案 ini 路径。不配则 `create_index` 返回 `Unsupported`、字段 vno 只能动态猜测，建议配上 |
+
+> **超时是写死的**，目前不可配置：HTTP 四引擎请求 30s、连接 10s；Meilisearch / Algolia 的任务轮询上限 30s（轮询间隔 100ms / 200ms）；XunSearch 单次 I/O 5s、整段结果流 20s。
+> 注意 Elasticsearch 的 `update_bulk` 会按约 5MB 分块发多个 `_bulk` 请求，所以单次调用的总耗时可能超过 30s —— 30s 是**单个请求**的上限，不是整个批量操作的上限。
+
+> **`options` 只被两个驱动读取**：Elasticsearch（整个对象透传给请求体；其中 `query` / `from` / `size` 三个保留键**会报错**——它们会被 builder 的同名设置覆盖，静默丢弃等于给你未过滤的结果，请改用 `.query()` / `.skip()` / `.take()`。`sort` 是例外：只有在你同时用了 `.order_by()` 时才会被拒绝，单独 `option("sort", …)` 照旧原样生效）与 Typesense（只认 `query_by`，且 `q` 非空时必填）。
+> 其余六个驱动**不读** `options`，传进去不会有任何效果。这正是本 crate 一贯拒绝的「静默」——所以这里显式写明，而不是等你装了才发现。
+
+> **只取总数、不要命中**：`.take(0)` 在各驱动上都合法，返回 `hits` 为空但 `total` 仍是过滤后的真实总数，适合做「一共多少条」的计数查询。
+
 > `ScoutConfig` 的 `Debug` 会把密钥打码：`options` 里 `*.api_key` / `*secret*` /
 > `*password*` / `*token` 一律渲染成 `"<redacted>"`，`println!("{:?}", config)`
 > 不会漏凭据。但 `Serialize` **仍按原样输出** —— 序列化是写配置文件的正路径，
@@ -362,9 +390,9 @@ let engine = EngineManager::new(config).engine()?;
 | `InvalidResult` | 文档字段不是 JSON 对象 | 内置 |
 | `Unsupported` | 驱动所需 feature 未启用、缺少必需配置、引擎不支持该操作 | 内置 |
 | `Json` | serde 序列化 / 反序列化错误 | 内置 |
-| `Http` | HTTP 请求失败（连接、超时、状态码） | HTTP 四引擎 |
+| `Http` | HTTP **传输**失败：连不上、超时、TLS、重定向被拒 | HTTP 四引擎 |
 | `Sqlx` | SQLite 错误 | `database` |
-| `Backend` | 后端返回了错误响应，原始信息透传 | HTTP 四引擎 / `xunsearch` |
+| `Backend` | 后端返回非 2xx，或后端自报失败（ES `timed_out` / 分片失败、任务未在期限内完成）。**HTTP 状态码在这里**——`429` 与 `400` 都进这个变体，要按状态码区分重试与否得解析消息文本（`Backend` 刻意透传原始信息） | HTTP 四引擎 / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | 协议解析失败 / TCP I/O 失败 | `xunsearch` |
 
 每个变体都带一条排查提示，见 [`ScoutError::pet_hint()`](#项目宠物)。

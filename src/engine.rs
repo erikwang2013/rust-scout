@@ -58,8 +58,14 @@ pub trait Engine: Send + Sync {
         })
     }
     /// 批量删除；默认实现逐条调用 [`Self::delete_in`]。
+    ///
+    /// 循环前先校验索引名（与 [`Self::flush`] 的默认实现同一做法）：`ids` 为空时
+    /// 循环一次都不跑，若把校验留给 `delete_in` 就永远不会发生 —— 于是
+    /// `delete_bulk("_all", &[])` 返回 `Ok`，而其余七个驱动对同一调用返回
+    /// `InvalidIndexName`。校验必须是这次调用里第一个能失败的东西。
     fn delete_bulk<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
+            crate::validate_index_name(index)?;
             for id in ids {
                 self.delete_in(index, std::slice::from_ref(id)).await?;
             }

@@ -107,6 +107,7 @@ rust-scout/
 │   └── (uji unit disisipkan di akhir tiap modul: #[cfg(test)] mod tests)
 ├── tests/                  # uji integrasi (masih kosong, uji ada di dalam src)
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search: alur pencarian utuh yang bisa dijalankan
 │   └── pet.rs              # cargo run --example pet: banner hewan + demo petunjuk kesalahan
 └── docs/
     ├── svg/                # hewan peliharaan + diagram arsitektur / fitur / desain / siklus hidup
@@ -133,7 +134,8 @@ ia **mengatakannya secara eksplisit** alih-alih diam-diam mengembalikan hasil ya
 | XunSearch | Soft delete belum diimplementasikan | `soft_delete` / `soft_delete_in` / `only_trashed` mengembalikan `Unsupported` |
 | XunSearch | Membuat indeks memerlukan ini skema field | `create_index` mengembalikan `Unsupported` (berikan ini ke `XunSearchEngine::new`) |
 | Typesense | `q` yang tidak kosong mewajibkan `query_by` | tanpa `.option("query_by", "field1,field2")` backend menjawab 400 `Parameter \`query_by\` is required`; driver tidak menebak field sendiri (tebakan yang salah akan diam-diam mengubah urutan) |
-| Meilisearch / Algolia | Penulisan berjalan sebagai task di backend | `update` / `update_bulk` / `delete` / `delete_in` memantau endpoint task sampai status akhir (batas 30 detik) dan mengembalikan error bila task gagal; penulisan massal jadi lebih lambat, tetapi data tidak lagi hilang diam-diam |
+| Algolia | Penulisan berjalan sebagai task: POST hanya mengembalikan `taskID`, dan diterima ≠ dapat dicari | `update` / `update_bulk` / `delete` / `delete_in` / `delete_bulk` / `soft_delete_in` / `reindex` memantau `/1/indexes/{index}/task/{taskID}` sampai `published` sebelum kembali; tidak terbit dalam 30 detik berarti error (hasil yang tidak diketahui tidak dilaporkan sebagai sukses) |
+| Meilisearch | Penulisan berjalan sebagai task: POST hanya mengembalikan `taskUid` | bentuk sama, memantau `/tasks/{uid}` sampai status akhir; task `failed` / `canceled` kini mengembalikan error `Backend` (dulu penulisan yang gagal dibuang diam-diam sebagai sukses), dan 30 detik tanpa status akhir berarti error. Penulisan massal jadi berbiaya «selama task backend berjalan» |
 | database | `reindex` **memindahkan**, bukan menyalin | indeks sumber dikosongkan (`id` adalah kunci utama global, satu id tidak bisa ada di dua indeks); bila sumber harus tetap ada, jangan pakai driver database |
 | XunSearch | `index: None` kini berarti indeks bernama `default` | sama seperti tujuh driver lainnya; sebelumnya ia jatuh ke basis data bawaan server xunsearchd (`db`) — data yang ditulis lewat `index: None` hanya terjangkau dengan `index("db")` |
 | Jumlah bawaan | Tanpa `take`, collection / database mengembalikan **semua** hasil | Enam driver lainnya mengembalikan **10** secara bawaan (batas kebiasaan backend masing-masing) |
@@ -153,11 +155,13 @@ Ada dua penyelarasan semantik yang disengaja:
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # hanya untuk contoh
 ```
 
 ### 2. Contoh minimal (driver in-memory bawaan)
+
+> Daripada salin-tempel, jalankan saja langsung: `cargo run --example collection_search` — tulis → kueri (where + pengurutan) → paginasi → hapus lunak → hapus indeks, seluruh alurnya, tanpa feature, tanpa layanan eksternal.
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -325,6 +329,31 @@ Konstruktor konfigurasi mesin lainnya ada di [docs.rs](https://docs.rs/rust-scou
 > sedangkan wheres / hapus lunak / pengurutan / paginasi semuanya di memori. Paginasi tidak bisa
 > diturunkan ke `LIMIT/OFFSET` SQL — baris yang cocok di luar jendela akan selamanya tak terjangkau.
 
+### Kunci Konfigurasi Driver
+
+Kunci di `ScoutConfig::insert` (atau yang ditulis langsung ke `options`) dibaca `EngineManager` saat membangun driver:
+
+| Kunci | Driver | Keterangan |
+|---------|--------------|---------|
+| `elasticsearch.host` / `opensearch.host` | Elasticsearch / OpenSearch | bawaan `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | Elasticsearch / OpenSearch | opsional |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | host bawaan `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | host bawaan `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | keduanya wajib |
+| `database.url` | SQLite | wajib |
+| `database.fields` | SQLite | **tidak lagi ikut serta dalam pencarian**, disimpan hanya demi kompatibilitas (dan dijadwalkan dihapus pada rilis perusak berikutnya). Dulu ia membatasi pencarian teks pada field yang didaftarkan, sehingga `database` berbeda dari basis in-memory (`collection`) untuk masukan yang sama (`fields=["title"]` + dokumen `{"title":"Rust","tag":"async"}` + kueri `"async"` → database 0 hit, collection 1); kini seluruh dokumen ikut dicocokkan. Array kosong dan menghilangkan kunci ini berperilaku sama |
+| `xunsearch.host` | XunSearch | bawaan `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | bawaan `default` |
+| `xunsearch.ini` | XunSearch | jalur ini skema field. Tanpanya `create_index` mengembalikan `Unsupported` dan vno field hanya bisa ditebak secara dinamis, jadi sebaiknya diisi |
+
+> **Timeout ditulis mati di kode**, untuk sekarang tidak bisa dikonfigurasi: empat mesin HTTP 30s per permintaan dan 10s untuk koneksi; polling tugas Meilisearch / Algolia dibatasi 30s (selang polling 100ms / 200ms); XunSearch 5s per I/O dan 20s untuk seluruh aliran hasil.
+> Perhatikan: `update_bulk` Elasticsearch memotong di sekitar 5MB menjadi beberapa permintaan `_bulk`, jadi satu panggilan bisa memakan waktu lebih dari 30s — angka 30s adalah batas **per permintaan**, bukan batas seluruh operasi bulk.
+
+> **`options` hanya dibaca dua driver**: Elasticsearch (seluruh objek diteruskan ke body permintaan; tiga kunci cadangan `query` / `from` / `size` **menghasilkan error** — kunci itu akan ditimpa oleh setelan builder yang bernama sama, dan membuangnya diam-diam akan memberi Anda hasil tanpa penyaringan; pakai `.query()` / `.skip()` / `.take()` sebagai gantinya. `sort` adalah pengecualian: hanya ditolak bila Anda juga memakai `.order_by()`, jadi `option("sort", …)` tunggal tetap berlaku apa adanya) dan Typesense (hanya `query_by`, yang wajib selama `q` tidak kosong).
+> Enam driver lainnya **tidak membaca** `options`; apa pun yang dikirim ke sana tidak akan berpengaruh. Justru kesenyapan inilah yang selalu ditolak crate ini untuk dibiarkan tanpa catatan — karena itu ditulis tegas di sini, bukan supaya Anda baru sadar setelah memasangnya.
+
+> **Hanya jumlah, tanpa hit**: `.take(0)` sah di semua driver — `hits` kembali kosong tetapi `total` tetap jumlah sebenarnya setelah penyaringan, jadi inilah cara bertanya «berapa yang cocok» tanpa mengambil barisnya.
+
 ### Field yang Dicadangkan
 
 `__soft_deleted` adalah nama field yang dicadangkan untuk fitur hapus lunak
@@ -344,9 +373,9 @@ Semua operasi mengembalikan `crate::Result<T>`, dengan kesalahan menyatu ke `Sco
 | `InvalidResult` | field dokumen bukan objek JSON | bawaan |
 | `Unsupported` | feature driver tidak aktif, konfigurasi wajib kurang, atau mesin tidak mendukung operasi itu | bawaan |
 | `Json` | kesalahan serialisasi / deserialisasi serde | bawaan |
-| `Http` | permintaan HTTP gagal (koneksi, timeout, kode status) | empat mesin HTTP |
+| `Http` | kegagalan **transmisi** HTTP: tidak bisa terhubung, timeout, TLS, pengalihan ditolak | empat mesin HTTP |
 | `Sqlx` | kesalahan SQLite | `database` |
-| `Backend` | backend mengembalikan respons kesalahan, pesan asli diteruskan apa adanya | empat mesin HTTP / `xunsearch` |
+| `Backend` | backend mengembalikan respons non-2xx, atau melaporkan kegagalannya sendiri (ES `timed_out` / shard gagal, tugas yang tak pernah mencapai keadaan terminal). **Kode status HTTP ada di sini** — baik `429` maupun `400` masuk ke varian ini, jadi membedakan yang layak dicoba ulang dari yang final berarti harus membaca teks pesannya (`Backend` sengaja meneruskannya apa adanya) | empat mesin HTTP / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | gagal mengurai protokol / gagal I/O TCP | `xunsearch` |
 
 Setiap varian membawa petunjuk penelusuran — lihat [`ScoutError::pet_hint()`](#hewan-peliharaan-proyek).

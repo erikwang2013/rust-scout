@@ -2,8 +2,11 @@
 //!
 //! 表设计：单表 `scout_documents`，`id` 全局唯一（同一 id 在多个索引写入时按
 //! upsert 覆盖，与 [`crate::CollectionEngine`] 的按索引存副本不同——见 delete 注释）。
-//! `searchable` 列 = 所有 searchable_fields 的值小写空格连接，供 LIKE 粗筛；
-//! `data` 列 = 完整字段 JSON，内存过滤时还原。
+//! `searchable` 列 = 整份字段 JSON 的小写，供 LIKE 粗筛（必须是内存
+//! `matches()` 的超集，否则会静默丢结果）；`data` 列 = 同样的 JSON 原样，
+//! 内存过滤时还原。
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sqlx::Row;
 
@@ -12,17 +15,28 @@ use crate::{Result, SearchBuilder, SearchDocument, SearchHit, SearchResult};
 
 pub struct DatabaseEngine {
     pool: sqlx::SqlitePool,
+    /// **不再影响搜索范围**，仅保留以维持 [`Self::new`] 的公开签名。
+    ///
+    /// 早期用它拼 `searchable` 列，于是文本查询只覆盖这些字段，而基准驱动
+    /// （[`crate::CollectionEngine`]）搜整份文档 —— 同一输入两个驱动给出不同结果。
+    /// 现在粗筛对齐基准，这个字段成了摆设，待下个 breaking 版本连同构造参数一起删。
+    #[allow(dead_code)]
     searchable_fields: Vec<String>,
+    /// 表结构是否已建（见 [`Self::ensure_schema`]）。
+    schema_ready: AtomicBool,
 }
 
 impl DatabaseEngine {
     /// 同步构造（`connect_lazy`：连接池延迟建连），保持 [`crate::EngineManager::engine`]
-    /// 的同步签名。表结构在每次操作前用 `CREATE ... IF NOT EXISTS` 确保（幂等）。
+    /// 的同步签名。表结构在**首次操作**时建好（`CREATE ... IF NOT EXISTS`，幂等）。
+    ///
+    /// `searchable_fields` 已不参与搜索（见字段注释），保留只为不破坏签名。
     pub fn new(database_url: &str, searchable_fields: Vec<String>) -> Result<Self> {
         let pool = sqlx::sqlite::SqlitePoolOptions::new().connect_lazy(database_url)?;
         Ok(Self {
             pool,
             searchable_fields,
+            schema_ready: AtomicBool::new(false),
         })
     }
 
@@ -31,39 +45,58 @@ impl DatabaseEngine {
         Self {
             pool,
             searchable_fields,
+            schema_ready: AtomicBool::new(false),
         }
     }
 
-    async fn ensure_schema(pool: &sqlx::SqlitePool) -> Result<()> {
+    /// 建表建索引（幂等）。真正的语句只在**首次**操作时发一次：两条
+    /// `CREATE ... IF NOT EXISTS` 实测 145µs/次，200 行搜索的 8% 都花在这上面，
+    /// 10k 次小操作就是 1.45s 的纯开销。`AtomicBool` 而不是 `bool`：Engine 要求
+    /// `Send + Sync` 且方法是 `&self`。
+    ///
+    /// 取舍：外部绕过驱动把表删掉后不再自愈（旧行为每次都补一遍）。进程内驱动
+    /// 独占这张表，为「别人在背后删表」付每次操作的钱是错的。
+    async fn ensure_schema(&self) -> Result<()> {
+        if self.schema_ready.load(Ordering::Acquire) {
+            return Ok(());
+        }
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS scout_documents (\
              id TEXT PRIMARY KEY, index_name TEXT NOT NULL, \
              searchable TEXT NOT NULL, data TEXT NOT NULL)",
         )
-        .execute(pool)
+        .execute(&self.pool)
         .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_scout_index ON scout_documents (index_name)")
-            .execute(pool)
+            .execute(&self.pool)
             .await?;
+        // 两条都成功才置位：中途失败下次仍会重试。
+        self.schema_ready.store(true, Ordering::Release);
         Ok(())
     }
 
     async fn write_all(&self, docs: &[SearchDocument]) -> Result<()> {
+        // 写入的索引名来自 doc.index（None ≡ "default"）：与五个网络驱动同契约，
+        // 且校验排在 ensure_schema 之前 —— 库不可用时也该是 InvalidIndexName。
+        // 先整批校验再开事务，避免「写进去几条才报错」的半截状态。
+        for doc in docs {
+            crate::validate_index_name(doc.index.as_deref().unwrap_or("default"))?;
+        }
         let pool = self.pool.clone();
-        Self::ensure_schema(&pool).await?;
+        self.ensure_schema().await?;
         let mut tx = pool.begin().await?;
         for doc in docs {
             let index = doc.index.clone().unwrap_or_else(|| "default".to_string());
-            let searchable = self
-                .searchable_fields
-                .iter()
-                .filter_map(|f| doc.fields.get(f))
-                .map(|v| match v {
-                    serde_json::Value::String(s) => s.to_lowercase(),
-                    other => other.to_string().to_lowercase(),
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
+            // searchable 存**整份字段 JSON 的小写**，而不是配置字段白名单的值。
+            //
+            // 粗筛（SQL LIKE）只需是内存 matches() 的**超集**，但它必须是超集：
+            // 漏掉 matches() 本会保留的行就是静默的错误答案。而 matches() 搜的是
+            // 整份序列化 JSON，所以粗筛也必须是整份 JSON。曾经只拼白名单字段的值，
+            // 于是 `fields=["title"]` + 文档 {"title":"Rust","tag":"async"} + 查
+            // "async" 会得到 database 0 条、collection 1 条 —— 八个驱动对同一输入
+            // 给出不同答案。`searchable_fields` 因此不再影响搜索范围。
+            let data = serde_json::to_string(&doc.fields)?;
+            let searchable = data.to_lowercase();
             sqlx::query(
                 "INSERT INTO scout_documents (id, index_name, searchable, data) \
                  VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \
@@ -73,7 +106,7 @@ impl DatabaseEngine {
             .bind(&doc.id)
             .bind(&index)
             .bind(&searchable)
-            .bind(serde_json::to_string(&doc.fields)?)
+            .bind(&data)
             .execute(&mut *tx)
             .await?;
         }
@@ -83,7 +116,7 @@ impl DatabaseEngine {
 
     async fn delete_by_ids(&self, ids: &[String]) -> Result<()> {
         let pool = self.pool.clone();
-        Self::ensure_schema(&pool).await?;
+        self.ensure_schema().await?;
         // 整批一个事务（与 write_all 同款）：逐条 `execute(&pool)` 时每条 DELETE 都是
         // 独立隐式事务，SQLite 默认 rollback journal + synchronous=FULL 每条都要
         // fsync，1000 个 id 就是 1000 次同步。语义不变：不存在的 id 静默跳过。
@@ -104,7 +137,7 @@ impl DatabaseEngine {
         // 在这里 Ok、在 ES 上 Err。
         crate::validate_index_name(index)?;
         let pool = self.pool.clone();
-        Self::ensure_schema(&pool).await?;
+        self.ensure_schema().await?;
         let mut tx = pool.begin().await?;
         for id in ids {
             sqlx::query("DELETE FROM scout_documents WHERE index_name = ? AND id = ?")
@@ -119,7 +152,7 @@ impl DatabaseEngine {
 
     async fn soft_delete_impl(&self, ids: &[String]) -> Result<()> {
         let pool = self.pool.clone();
-        Self::ensure_schema(&pool).await?;
+        self.ensure_schema().await?;
         // 读-改-写整体进同一事务：除了省掉每 id 一次的 fsync，UPDATE 拿到的写锁
         // 持有到 commit，中间不会有别的连接插进来改同一份 data。
         let mut tx = pool.begin().await?;
@@ -144,8 +177,11 @@ impl DatabaseEngine {
     }
 
     async fn reindex_impl(&self, from: &str, to: &str) -> Result<()> {
+        // 两端都校验，且先于建表/取连接（与 ES/Algolia 同序）
+        crate::validate_index_name(from)?;
+        crate::validate_index_name(to)?;
         let pool = self.pool.clone();
-        Self::ensure_schema(&pool).await?;
+        self.ensure_schema().await?;
         // 这是**移动**不是复制：from 的文档改归属到 to，from 随即为空。
         //
         // 为什么不做真复制：id 是全局主键（见模块头），复制到 to 时同 id 行会撞
@@ -166,10 +202,17 @@ impl DatabaseEngine {
     }
 
     async fn search_impl(&self, builder: &SearchBuilder) -> Result<SearchResult> {
-        let pool = self.pool.clone();
-        Self::ensure_schema(&pool).await?;
         let index = builder.index.as_deref().unwrap_or("default");
+        // 校验必须排在建表/取连接之前（与 ES `search_hits` 同序）：库不可用时
+        // 保留名要报 InvalidIndexName，而不是 I/O 错误。
+        crate::validate_index_name(index)?;
+        let pool = self.pool.clone();
+        self.ensure_schema().await?;
         let q = builder.query.trim().to_lowercase();
+        // `searchable` 列现在存整份字段 JSON 的小写（见 `write_all`），所以只要
+        // 查询非空，粗筛就一定能覆盖 `matches()` 的结果 —— 不再需要「没配字段就
+        // 跳过粗筛」那种兜底：那时候 `database.fields` 缺省会让整列恒为 ""，
+        // `searchable LIKE '%q%'` 一条都匹配不上，**每个文本查询都静默返回 0 条**。
         let like = !q.is_empty();
 
         // SQL 只负责：索引维度 + LIKE 粗筛。
@@ -212,15 +255,23 @@ impl DatabaseEngine {
             .filter(|doc| trashed_allows(builder, doc))
             .filter(|doc| builder.matches(doc))
             .collect();
-        matched.sort_by(|a, b| {
+        let cmp = |a: &&SearchDocument, b: &&SearchDocument| {
             builder.sort_cmp((Some(&a.fields), a.id.as_str()), (Some(&b.fields), b.id.as_str()))
-        });
+        };
 
         // 与 CollectionEngine::selected 一致：total 是**过滤后**的命中总数，
         // 分页在最后一步切。
         let total = matched.len();
         let offset = builder.skip.unwrap_or(0);
         let take = builder.take.unwrap_or(total);
+        // 同 CollectionEngine：先 top-K 分区再排序，window 外的元素直接 truncate。
+        // sort_cmp 是按 id 兜底的全序，结果与「全排序再取窗口」逐条相同。
+        let k = offset.saturating_add(take).min(total);
+        if k < total {
+            matched.select_nth_unstable_by(k, cmp);
+            matched.truncate(k);
+        }
+        matched.sort_by(cmp);
         let hits = matched
             .into_iter()
             .skip(offset)
@@ -313,7 +364,7 @@ impl Engine for DatabaseEngine {
         Box::pin(async move {
             crate::validate_index_name(index)?;
             let pool = self.pool.clone();
-            Self::ensure_schema(&pool).await?;
+            self.ensure_schema().await?;
             // 真删该索引的行。此前这里是 no-op：而 README（及 12 份译文）的索引
             // 生命周期把 delete_index 当作「清空索引」的入口——update → delete_index
             // → search 仍返回全部旧文档，文档与行为相反。只按 index_name 删，
@@ -340,7 +391,7 @@ impl Engine for DatabaseEngine {
         Box::pin(async move {
             crate::validate_index_name(index)?;
             let pool = self.pool.clone();
-            Self::ensure_schema(&pool).await?;
+            self.ensure_schema().await?;
             // 一个事务包住 SELECT+UPDATE 循环（理由同 soft_delete_impl）。
             let mut tx = pool.begin().await?;
             for id in ids {

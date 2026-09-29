@@ -8,6 +8,10 @@ Date: 2026-08-31
 > 以及 `ScoutConfig` 的 `prefix` / `queue` / `after_commit` / `soft_delete` /
 > `identify` / `chunk_searchable` / `chunk_unsearchable` 占位字段均已移除。
 > **当前 API 以 `README.md` 与 rustdoc 为准**，本文中提到的这些名字已不存在。
+>
+> 另有两条本文的建议已经失效：**「用 `options` 透传原始查询片段」这个逃生口已关闭**
+> （`query` / `from` / `size` 三个保留键现在会报错而不是被静默覆盖），
+> **`database.fields` 也不再影响搜索范围**（粗筛改为对齐内存基准，它仅为兼容保留）。
 
 ## Context
 

@@ -29,6 +29,17 @@ pub(crate) enum PageMode {
 const TASK_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TASK_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// `soft_delete_in` 批量读的分块大小。两个上限都要躲开，缺一个就会**静默漏标**
+/// （返回 Ok，但那部分文档照样搜得到，比 N 次往返更糟）：
+///
+/// - Meilisearch 默认只回 **10** 条，读侧不显式 `.take()` 就只拿到一整块里的前 10 条；
+/// - 读只发一页，`hitsPerPage` 因此不能超过 `maxTotalHits`（默认 **1000**），
+///   且取满整块需要 `take(块大小)` —— 块是「`id IN [...]` 的结果上界」，
+///   一块最多命中块大小条，一页足够。
+///
+/// 250 同时留在两个上限之内，并与 `typesense_engine` 的同名分块一致。
+const SOFT_DELETE_CHUNK: usize = 250;
+
 /// Meilisearch 引擎。文档主键固定为 `id` 字段（add-or-replace 语义）；
 /// 软删除标记为 `__soft_deleted` 布尔字段。
 pub struct MeilisearchEngine {
@@ -162,10 +173,13 @@ impl Engine for MeilisearchEngine {
 
     fn delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
+            // 校验先于空列表短路：否则 delete_in("_all", &[]) 返回 Ok，而其余七个
+            // 驱动返回 InvalidIndexName —— 同一个输入两种答案，正是本 crate 当成
+            // 缺陷的那类分歧。校验也因此先于任何 I/O。
+            crate::validate_index_name(index)?;
             if ids.is_empty() {
                 return Ok(());
             }
-            crate::validate_index_name(index)?;
             let ids: Vec<Value> = ids.iter().map(|id| Value::String(id.clone())).collect();
             let path = format!("/indexes/{}/documents/delete-batch", percent_encode(index));
             let task = self
@@ -313,8 +327,13 @@ impl Engine for MeilisearchEngine {
                     .or_default()
                     .push(Self::doc_to_document(doc));
             }
-            for (index, docs) in groups {
+            // 校验全部索引名先于第一条请求：按组边校验边写时，{合法索引, 保留索引}
+            // 的一批会先把合法那组写进去再报错，调用方拿到 Err 时数据已经落了一半
+            // ——与 delete_in 同一条契约：校验是第一个能失败的东西。
+            for index in groups.keys() {
                 crate::validate_index_name(index)?;
+            }
+            for (index, docs) in groups {
                 let path = format!("/indexes/{}/documents?primaryKey=id", percent_encode(index));
                 let task = self
                     .request(reqwest::Method::POST, &path, Some(Value::Array(docs)))
@@ -333,39 +352,51 @@ impl Engine for MeilisearchEngine {
     /// 仅作用于 `index`。Meilisearch 的 add-or-replace 是整体替换，无法只更新
     /// 单字段：先按 id 搜出原文档再整体写回打标版本（搜不到则跳过）。
     ///
+    /// 读侧按 id 集合批量搜、写侧一次 POST（原先每条 id 各一次搜索 + 一次写 +
+    /// 一次任务轮询 = 3N 次往返，实测 100 条 id 要 10s 以上），分块理由与块大小
+    /// 见 `SOFT_DELETE_CHUNK`。写侧本来就按索引分组批量，收齐再写只为让整次调用
+    /// 只等一个写入任务；代价是单次 payload 随入参规模增长（与 Typesense 同形），
+    /// 超大批量该由调用方自己分片。
+    ///
     /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
     /// 原先它硬编码 `default`，对写在其它索引里的文档会静默跳过却返回 Ok。
     fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            for id in ids {
-                let builder =
-                    SearchBuilder::new("").within(index).where_field("id", id.clone());
+            let mut docs: Vec<SearchDocument> = Vec::new();
+            for chunk in ids.chunks(SOFT_DELETE_CHUNK) {
+                // take 必须给足整块：默认 limit 只有 10，少标的那部分文档返回 Ok
+                // 却照样搜得到（见 SOFT_DELETE_CHUNK）。
+                let builder = SearchBuilder::new("")
+                    .within(index)
+                    .take(SOFT_DELETE_CHUNK)
+                    .where_in("id", chunk.iter().map(String::as_str).collect::<Vec<_>>());
                 let result = self.search(&builder).await?;
-                let Some(hit) = result.hits.first() else {
-                    continue;
-                };
-                let mut fields: Map<String, Value> = match &hit.source {
-                    Value::Object(map) => map
-                        .iter()
-                        .filter(|(k, _)| !k.starts_with('_')) // 丢弃 _rankingScore 等元数据
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                    _ => Map::new(),
-                };
-                fields.insert("__soft_deleted".into(), Value::Bool(true));
-                let doc = SearchDocument {
-                    id: id.clone(),
-                    // 必须显式带上索引：update_bulk 按 doc.index 分组，缺省是
-                    // `default`。之前这里写 None —— 搜的是 `index`，写回却落在
-                    // default：目标索引里的文档根本没被标软删（依旧可搜到），
-                    // 同时给 default 塞了个幽灵副本、覆盖掉那儿的同 id 文档。
-                    index: Some(index.to_string()),
-                    fields,
-                };
-                self.update(std::slice::from_ref(&doc)).await?;
+                for hit in result.hits {
+                    let mut fields: Map<String, Value> = match &hit.source {
+                        Value::Object(map) => map
+                            .iter()
+                            .filter(|(k, _)| !k.starts_with('_')) // 丢弃 _rankingScore 等元数据
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                        _ => Map::new(),
+                    };
+                    fields.insert("__soft_deleted".into(), Value::Bool(true));
+                    docs.push(SearchDocument {
+                        id: hit.id,
+                        // 必须显式带上索引：update_bulk 按 doc.index 分组，缺省是
+                        // `default`。之前这里写 None —— 搜的是 `index`，写回却落在
+                        // default：目标索引里的文档根本没被标软删（依旧可搜到），
+                        // 同时给 default 塞了个幽灵副本、覆盖掉那儿的同 id 文档。
+                        index: Some(index.to_string()),
+                        fields,
+                    });
+                }
             }
-            Ok(())
+            if docs.is_empty() {
+                return Ok(()); // 全都没搜到：别发一次空的 POST
+            }
+            self.update(&docs).await
         })
     }
     // reindex：trait 默认 Unsupported（Meilisearch 无原生端点）。

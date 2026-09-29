@@ -76,16 +76,25 @@ impl XunSearchEngine {
         with_timeout(TcpStream::connect(addr)).await
     }
 
-    async fn use_project(&self, stream: &mut TcpStream, db: Option<&str>) -> crate::Result<()> {
-        let project = self.project_name()?; // 项目名校验先于协议（同库名）
-        with_timeout(stream.write_all(&pack_cmd(CMD_USE, 0, 0, project.as_bytes(), &[]))).await?;
-        expect_ok(stream, OK_PROJECT, "CMD_USE").await?;
+    /// 连接 + CMD_USE 握手（`db` 为 `None` 时只选项目，SET_DB 由调用方自理）。
+    ///
+    /// 项目名与库名的校验**都排在 connect 之前**：两者都是纯名字检查，不该受后端
+    /// 存活影响。原先库名校验挂在握手之后，于是同一个 `"_all"` 在服务端挂着时被报成
+    /// `XunSearchIo`，「名字非法」这件事要看后端脸色才知道 —— 其余七个驱动一律
+    /// `InvalidIndexName`，同一个输入的错误类型不能随后端死活而变。
+    async fn open(&self, search: bool, db: Option<&str>) -> crate::Result<TcpStream> {
+        let project = self.project_name()?; // 校验先于 I/O
         if let Some(db) = db {
-            crate::validate_index_name(db)?; // 系统边界：库名校验先于协议
-            with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_SET_DB, 0, 0, db.as_bytes(), &[]))).await?;
-            expect_ok(stream, OK_DB_CHANGED, "CMD_INDEX_SET_DB").await?;
+            crate::validate_index_name(db)?; // 校验先于 I/O
         }
-        Ok(())
+        let mut stream = self.connect(search).await?;
+        with_timeout(stream.write_all(&pack_cmd(CMD_USE, 0, 0, project.as_bytes(), &[]))).await?;
+        expect_ok(&mut stream, OK_PROJECT, "CMD_USE").await?;
+        if let Some(db) = db {
+            with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_SET_DB, 0, 0, db.as_bytes(), &[]))).await?;
+            expect_ok(&mut stream, OK_DB_CHANGED, "CMD_INDEX_SET_DB").await?;
+        }
+        Ok(stream)
     }
 
     /// 搜索静默命令（QUERY_INIT/PARSE、SET_SORT、SET_NUMERIC、QUERY_RANGE），与 GET_RESULT 同一次 write 发出。
@@ -119,6 +128,13 @@ impl XunSearchEngine {
     }
 
     async fn do_search(&self, builder: &SearchBuilder) -> crate::Result<SearchResult> {
+        // index=None ≡ "default"（与其余七个驱动一致）：否则
+        // `update([index Some("default")])` 写的是 default 库、
+        // `search(无 index)` 读的却是服务端默认库，两边各自都是空。
+        let index = builder.index.as_deref().unwrap_or("default");
+        // 校验排在这里，早于下面所有短路与 I/O：空 where_in / only_trashed 的早退
+        // 不能把非法库名放过去（`within("_all")` 在别处七个驱动是 InvalidIndexName）。
+        crate::validate_index_name(index)?;
         if builder.trashed == crate::TrashedFilter::OnlyTrashed {
             return Err(crate::ScoutError::Unsupported("xunsearch: only_trashed requires soft_delete, which this engine does not implement".to_string()));
         }
@@ -134,11 +150,7 @@ impl XunSearchEngine {
         if unsupported {
             return Err(crate::ScoutError::Unsupported("xunsearch: where_in/where_not_in not supported; use where_field (QUERY_RANGE)".to_string()));
         }
-        let mut stream = self.connect(true).await?;
-        // index=None ≡ "default"（与其余七个驱动一致）：否则
-        // `update([index Some("default")])` 写的是 default 库、
-        // `search(无 index)` 读的却是服务端默认库，两边各自都是空。
-        self.use_project(&mut stream, Some(builder.index.as_deref().unwrap_or("default"))).await?;
+        let mut stream = self.open(true, Some(index)).await?;
         let mut buf = self.build_silent(builder)?;
         // 发给服务端的窗口不变（take，缺省 10）；接受上限再套 MAX_HITS
         let limit = builder.take.unwrap_or(10);
@@ -324,8 +336,6 @@ impl Engine for XunSearchEngine {
             if docs.is_empty() {
                 return Ok(());
             }
-            let mut stream = self.connect(false).await?;
-            self.use_project(&mut stream, None).await?;
             // 按 doc.index 分组，`None` ≡ "default"（与其余七个驱动一致：search 那边
             // 读的也是 default 库，两边对得上）。每组都显式 SET_DB —— 组间串库不再
             // 可能，因此也不需要再把「无 index」那组排到最前。
@@ -337,8 +347,13 @@ impl Engine for XunSearchEngine {
                     None => groups.push((index, vec![doc])),
                 }
             }
-            for (index, group) in groups {
+            // 分组是纯计算，校验也放在连接之前：后端不可达时非法 doc.index 仍报
+            // InvalidIndexName，而不是把 I/O 失败抛在前面（同 search 的库名）。
+            for (index, _) in &groups {
                 crate::validate_index_name(index)?; // 系统边界：组级库名校验
+            }
+            let mut stream = self.open(false, None).await?;
+            for (index, group) in groups {
                 with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_SET_DB, 0, 0, index.as_bytes(), &[]))).await?;
                 expect_ok(&mut stream, OK_DB_CHANGED, "CMD_INDEX_SET_DB").await?;
                 let mut buf = Vec::new();
@@ -366,9 +381,8 @@ impl Engine for XunSearchEngine {
             if ids.is_empty() {
                 return Ok(());
             }
-            let mut stream = self.connect(false).await?;
             // 无 index ≡ "default"，与其余七个驱动的 `delete_in("default")` 一致
-            self.use_project(&mut stream, Some("default")).await?;
+            let mut stream = self.open(false, Some("default")).await?;
             self.send_removes(&mut stream, ids).await
         })
     }
@@ -382,11 +396,14 @@ impl Engine for XunSearchEngine {
 
     fn delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
+            // 校验排在空 id 短路之前：`delete_in("_all", &[])` 在其余七个驱动上都报
+            // InvalidIndexName，不能因为「没有 id 要删」就返回 Ok —— 同一个输入必须
+            // 有同一个答案，与后端是否存活、列表是否为空都无关。
+            crate::validate_index_name(index)?;
             if ids.is_empty() {
                 return Ok(());
             }
-            let mut stream = self.connect(false).await?;
-            self.use_project(&mut stream, Some(index)).await?;
+            let mut stream = self.open(false, Some(index)).await?;
             self.send_removes(&mut stream, ids).await
         })
     }
@@ -419,9 +436,7 @@ impl Engine for XunSearchEngine {
     /// 忽略，`flush("_all")` 还会静默成功）。
     fn flush<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
-            crate::validate_index_name(index)?;
-            let mut stream = self.connect(false).await?;
-            self.use_project(&mut stream, Some(index)).await?;
+            let mut stream = self.open(false, Some(index)).await?;
             with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_COMMIT, 0, 0, &[], &[]))).await?;
             match read_packet(&mut stream).await? {
                 (CMD_OK, OK_DB_COMMITED, _, _) => Ok(()),
@@ -432,9 +447,12 @@ impl Engine for XunSearchEngine {
         })
     }
 
-    fn create_index<'a>(&'a self, _index: &'a str, _settings: serde_json::Value) -> EngineFuture<'a, ()> {
+    fn create_index<'a>(&'a self, index: &'a str, _settings: serde_json::Value) -> EngineFuture<'a, ()> {
         // CMD_USE 只建项目 home；ini 无法经协议上传，构造时已提供 → no-op。
         Box::pin(async move {
+            // 校验先于两个分支：有 ini 时它是 no-op，不能对保留名静默 Ok；没 ini 时
+            // 也不该让 Unsupported 抢在 InvalidIndexName（名字非法优先于「不支持」）。
+            crate::validate_index_name(index)?;
             if self.has_ini {
                 Ok(())
             } else {
@@ -446,11 +464,8 @@ impl Engine for XunSearchEngine {
     fn delete_index<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         // CLEAN_DB 只清空该库；DELETE_PROJECT 毁掉整个项目，禁用。
         Box::pin(async move {
-            let mut stream = self.connect(false).await?;
-            self.use_project(&mut stream, None).await?;
-            crate::validate_index_name(index)?; // 系统边界
-            with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_SET_DB, 0, 0, index.as_bytes(), &[]))).await?;
-            expect_ok(&mut stream, OK_DB_CHANGED, "CMD_INDEX_SET_DB").await?;
+            // 库名随 CMD_USE/SET_DB 一起交给 open：校验先于连接。
+            let mut stream = self.open(false, Some(index)).await?;
             with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_CLEAN_DB, 0, 0, &[], &[]))).await?;
             expect_ok(&mut stream, OK_DB_CLEAN, "CMD_INDEX_CLEAN_DB").await
         })

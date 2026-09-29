@@ -101,11 +101,12 @@ impl ElasticsearchEngine {
         let index = builder.index.as_deref().unwrap_or("default");
         crate::validate_index_name(index)?;
         let path = format!("/{}/_search", percent_encode(index));
+        let body = build_body(builder, from, size)?;
         let (status, body) = self
             .raw_request(
                 reqwest::Method::POST,
                 &path,
-                Some(build_body(builder, from, size).to_string()),
+                Some(body.to_string()),
                 Some("application/json"),
             )
             .await?;
@@ -142,6 +143,72 @@ impl ElasticsearchEngine {
     }
 }
 
+/// 单次 `_bulk` 请求体的字节上界。
+///
+/// ES 官方对 bulk 的建议按体积给（5–15MB 量级）而不是按文档条数，这里取 5MB 这个下界。
+/// 上限存在的理由不是 ES 的偏好，而是驱动自身的断崖：client 的 30s 超时是硬编码的，
+/// 调用方既调不大超时，也换不了分块大小，所以「整个索引的文档塞进一次请求」到 100k 篇
+/// （轻松上百 MB）必然在 30s 处整批失败，且失败后连重试的粒度都没有。切块后单请求的
+/// 超时风险随块缩小；任一块失败仍然整体失败，语义不变。
+const BULK_CHUNK_BYTES: usize = 5 * 1024 * 1024;
+
+/// 把 NDJSON 行按 [`BULK_CHUNK_BYTES`] 切成若干请求体（每行自带换行）。
+///
+/// 单行超过预算时该行独占一块：ES 只接受整篇文档，从行中间切开会造出非法 NDJSON，
+/// 而丢掉这篇文档比超预算糟糕得多。
+fn bulk_chunks(lines: Vec<String>) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for line in lines {
+        if !current.is_empty() && current.len() + line.len() > BULK_CHUNK_BYTES {
+            chunks.push(std::mem::take(&mut current));
+        }
+        current.push_str(&line);
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+impl ElasticsearchEngine {
+    /// 逐块发送 NDJSON 到 `/{index}/_bulk`：每块一次请求，任一块失败即整体失败。
+    /// 空行列表不发请求（调用方的空输入不该产生空请求）。
+    ///
+    /// `tolerate_missing_index` 覆盖顶层 404（索引不存在）：删除必须幂等，而
+    /// [`Engine::delete_in`] 的逐条版本本来就放行它，批量版不能更严格。
+    async fn send_bulk(
+        &self,
+        index: &str,
+        lines: Vec<String>,
+        tolerate_missing_index: bool,
+        check: fn(&serde_json::Value) -> crate::Result<()>,
+    ) -> crate::Result<()> {
+        let path = format!("/{}/_bulk", percent_encode(index));
+        for chunk in bulk_chunks(lines) {
+            let (status, body) = self
+                .raw_request(
+                    reqwest::Method::POST,
+                    &path,
+                    Some(chunk),
+                    Some("application/x-ndjson"),
+                )
+                .await?;
+            if tolerate_missing_index && status == reqwest::StatusCode::NOT_FOUND {
+                continue;
+            }
+            if !status.is_success() {
+                return Err(crate::ScoutError::Backend(format!(
+                    "{} {} -> {}: {}",
+                    reqwest::Method::POST, path, status, body
+                )));
+            }
+            check(&serde_json::from_str(&body)?)?;
+        }
+        Ok(())
+    }
+}
+
 impl Engine for ElasticsearchEngine {
     fn update<'a>(&'a self, docs: &'a [SearchDocument]) -> EngineFuture<'a, ()> {
         // 与 update_bulk 同语义（`index` 动作就是整篇重建），委托它按索引分组走 _bulk。
@@ -154,31 +221,9 @@ impl Engine for ElasticsearchEngine {
     }
 
     fn delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
-        Box::pin(async move {
-            crate::validate_index_name(index)?;
-            for id in ids {
-                let path = format!(
-                    "/{}/_doc/{}",
-                    percent_encode(index),
-                    percent_encode(id)
-                );
-                let (status, body) = self
-                    .raw_request(reqwest::Method::DELETE, &path, None, None)
-                    .await?;
-                // ES 对「文档不存在」和「索引不存在」都回 404；删除必须幂等，
-                // 与 collection/database/typesense/meilisearch 保持一致。
-                if status == reqwest::StatusCode::NOT_FOUND {
-                    continue;
-                }
-                if !status.is_success() {
-                    return Err(crate::ScoutError::Backend(format!(
-                        "{} {} -> {}: {}",
-                        reqwest::Method::DELETE, path, status, body
-                    )));
-                }
-            }
-            Ok(())
-        })
+        // 逐条 DELETE /{index}/_doc/{id} 是 N 个 id N 次往返；_bulk 一次删完，
+        // 幂等语义完全一致（顶层 404 与逐条 404 都放行，见 delete_bulk / send_bulk）。
+        self.delete_bulk(index, ids)
     }
 
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
@@ -241,39 +286,34 @@ impl Engine for ElasticsearchEngine {
 
     fn update_bulk<'a>(&'a self, docs: &'a [SearchDocument]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
-            // 按 index 分组，每组一次 _bulk 请求（NDJSON）。
+            // 按 index 分组（元数据行与文档行各占一行，_bulk 的 NDJSON 要求），
+            // 每组按体积切块后发送，见 send_bulk。
             let mut groups: std::collections::HashMap<&str, Vec<&SearchDocument>> =
                 Default::default();
             for doc in docs {
                 let index = doc.index.as_deref().unwrap_or("default");
                 groups.entry(index).or_default().push(doc);
             }
-            for (index, docs) in groups {
+            // 先校验**所有**分组名，再发第一个请求。否则一批里混着 {合法, 非法}
+            // 两个索引时，合法那组已经写进后端，才轮到非法组报错 —— 调用方拿到
+            // Err，却有一半数据落了盘。校验必须是这次调用里第一个能失败的东西。
+            // 先校验**所有**分组名，再发第一个请求。否则一批里混着 {合法, 非法}
+            // 两个索引时，合法那组已经写进后端，才轮到非法组报错 —— 调用方拿到
+            // Err，却有一半数据落了盘。校验必须是这次调用里第一个能失败的东西。
+            for index in groups.keys() {
                 crate::validate_index_name(index)?;
-                let mut body = String::new();
+            }
+            for (index, docs) in groups {
+                let mut lines = Vec::with_capacity(docs.len() * 2);
                 for doc in docs {
-                    body.push_str(&format!(
-                        "{{\"index\":{{\"_id\":{}}}}}\n{}\n",
-                        serde_json::to_string(&doc.id)?,
-                        serde_json::to_string(&doc.fields)?
+                    lines.push(format!(
+                        "{{\"index\":{{\"_id\":{}}}}}\n",
+                        serde_json::to_string(&doc.id)?
                     ));
+                    lines.push(format!("{}\n", serde_json::to_string(&doc.fields)?));
                 }
-                let path = format!("/{}/_bulk", percent_encode(index));
-                let (status, body) = self
-                    .raw_request(
-                        reqwest::Method::POST,
-                        &path,
-                        Some(body),
-                        Some("application/x-ndjson"),
-                    )
+                self.send_bulk(index, lines, false, check_bulk_items)
                     .await?;
-                if !status.is_success() {
-                    return Err(crate::ScoutError::Backend(format!(
-                        "{} {} -> {}: {}",
-                        reqwest::Method::POST, path, status, body
-                    )));
-                }
-                check_bulk_items(&serde_json::from_str(&body)?)?;
             }
             Ok(())
         })
@@ -282,71 +322,39 @@ impl Engine for ElasticsearchEngine {
     fn delete_bulk<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            if ids.is_empty() {
-                return Ok(());
-            }
-            let mut body = String::new();
+            let mut lines = Vec::with_capacity(ids.len());
             for id in ids {
-                body.push_str(&format!(
+                lines.push(format!(
                     "{{\"delete\":{{\"_id\":{}}}}}\n",
                     serde_json::to_string(id)?
                 ));
             }
-            let path = format!("/{}/_bulk", percent_encode(index));
-            let (status, body) = self
-                .raw_request(
-                    reqwest::Method::POST,
-                    &path,
-                    Some(body),
-                    Some("application/x-ndjson"),
-                )
-                .await?;
-            if !status.is_success() {
-                return Err(crate::ScoutError::Backend(format!(
-                    "{} {} -> {}: {}",
-                    reqwest::Method::POST, path, status, body
-                )));
-            }
-            // 删除语义：404（文档或索引不存在）视为成功，保持幂等。
-            check_bulk_delete_items(&serde_json::from_str(&body)?)
+            // 删除语义：文档不存在（逐条 404）与索引不存在（顶层 404）都算成功，
+            // 保持幂等 —— delete_in 委托到这条路径，两者都必须放行缺失索引。
+            self.send_bulk(index, lines, true, check_bulk_delete_items)
+                .await
         })
     }
 
     /// 仅作用于 `index`。_bulk 的 `update` 动作是同样的原子部分更新（不读改写），
-    /// 所有 id 一次请求打完；文档/索引不存在的 404 由
-    /// 底层的 `check_bulk_delete_items` 逐条放行，幂等语义与逐条版本一致。
+    /// 所有 id 走 _bulk（超过单块预算时自动切块，见 `BULK_CHUNK_BYTES`）；文档/索引
+    /// 不存在的 404 由底层的 `check_bulk_delete_items` 逐条放行，幂等语义与逐条版本一致。
     ///
     /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
     /// 原先它硬编码 `default`，对写在其它索引里的文档会静默什么都不做却返回 Ok。
     fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            if ids.is_empty() {
-                return Ok(());
-            }
-            let mut body = String::new();
+            let mut lines = Vec::with_capacity(ids.len() * 2);
             for id in ids {
-                body.push_str(&format!(
-                    "{{\"update\":{{\"_id\":{}}}}}\n{{\"doc\":{{\"__soft_deleted\":true}}}}\n",
+                lines.push(format!(
+                    "{{\"update\":{{\"_id\":{}}}}}\n",
                     serde_json::to_string(id)?
                 ));
+                lines.push("{\"doc\":{\"__soft_deleted\":true}}\n".to_string());
             }
-            let path = format!("/{}/_bulk", percent_encode(index));
-            let (status, body) = self
-                .raw_request(
-                    reqwest::Method::POST,
-                    &path,
-                    Some(body),
-                    Some("application/x-ndjson"),
-                )
-                .await?;
-            if !status.is_success() {
-                return Err(crate::ScoutError::Backend(format!(
-                    "{} {} -> {}: {}",
-                    reqwest::Method::POST, path, status, body
-                )));
-            }
-            check_bulk_delete_items(&serde_json::from_str(&body)?)
+            self.send_bulk(index, lines, false, check_bulk_delete_items)
+                .await
         })
     }
 

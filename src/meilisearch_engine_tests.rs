@@ -329,6 +329,136 @@
     }
 
     #[tokio::test]
+    async fn soft_delete_in_batches_read_and_write() {
+        // 回归（实测：100 条 id ≥ 10s）：曾经每条 id 各一次搜索 + 一次写入 +
+        // 一次任务轮询（3N 次往返，每次轮询间隔 100ms）。现在一次批量搜 + 一次写入。
+        let (host, seen) = stub(vec![
+            (
+                200,
+                r#"{"hits":[{"id":"b1","title":"t","_rankingScore":0.9},{"id":"b2","title":"u"}],"totalHits":2}"#
+                    .to_string(),
+            ),
+            (202, r#"{"taskUid":1,"status":"enqueued"}"#.to_string()),
+            (200, r#"{"uid":1,"status":"succeeded"}"#.to_string()),
+        ]);
+        let engine = MeilisearchEngine::new(host, None);
+        engine
+            .soft_delete_in("books", &["b1".to_string(), "b2".to_string()])
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap();
+        let paths: Vec<&str> = seen.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/indexes/books/search",
+                "/indexes/books/documents?primaryKey=id",
+                "/tasks/1",
+            ],
+            "两条 id 也只该读一次、写一次"
+        );
+        let read = &seen[0].1;
+        assert!(
+            read.contains(r#""hitsPerPage":250"#),
+            "读侧要显式取满整块：Meilisearch 默认只回 10 条: {read}"
+        );
+        let write = &seen[1].1;
+        assert!(
+            write.contains(r#""id":"b1""#) && write.contains(r#""id":"b2""#),
+            "两条都要写回: {write}"
+        );
+        assert!(write.contains(r#""__soft_deleted":true"#), "{write}");
+        // 读回来的是整个 hit（含 `_rankingScore` 这类元数据），写回前必须剥掉：
+        // 否则它会被当成文档字段写进索引。
+        assert!(!write.contains("_rankingScore"), "元数据不该写回索引: {write}");
+    }
+
+    #[tokio::test]
+    async fn soft_delete_in_reads_every_chunk_not_just_the_first_page() {
+        // Meilisearch 默认 limit=10、maxTotalHits（默认 1000）封着单次读的上限：
+        // 整块 id 一次搜回必须显式 take 且分块。少标的那部分文档照样返回 Ok 却仍然
+        // 搜得到——比 N 次往返更糟，所以这里钉住「超过一块要接着读下一块」。
+        let ids: Vec<String> = (0..=SOFT_DELETE_CHUNK).map(|i| format!("id{i}")).collect();
+        let (host, seen) = stub(vec![
+            (200, r#"{"hits":[{"id":"id0"}],"totalHits":1}"#.to_string()),
+            (200, r#"{"hits":[],"totalHits":0}"#.to_string()),
+            (202, r#"{"taskUid":1,"status":"enqueued"}"#.to_string()),
+            (200, r#"{"uid":1,"status":"succeeded"}"#.to_string()),
+        ]);
+        let engine = MeilisearchEngine::new(host, None);
+        engine.soft_delete_in("books", &ids).await.unwrap();
+
+        let seen = seen.lock().unwrap();
+        let paths: Vec<&str> = seen.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/indexes/books/search",
+                "/indexes/books/search",
+                "/indexes/books/documents?primaryKey=id",
+                "/tasks/1",
+            ],
+            "{} 条 id 要读两块，写仍然只一次",
+            ids.len()
+        );
+        // 两块互补且不重不漏：第 250 条落在第二块，且第二块里没有第一块的 id。
+        // 过滤器在 JSON 串里是转义过的（`\"id249\"`），所以解析出来再比。
+        let filter = |body: &str| {
+            serde_json::from_str::<Value>(body).unwrap()["filter"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (first, second) = (filter(&seen[0].1), filter(&seen[1].1));
+        assert!(first.contains("id249"), "第一块要装下前 250 条: {first}");
+        assert!(second.contains("id250"), "第二块要接着读剩下的 id: {second}");
+        assert!(!second.contains("id0"), "两块不能重叠: {second}");
+    }
+
+    #[tokio::test]
+    async fn empty_id_list_still_validates_the_index_name() {
+        // 回归：空列表短路曾排在 validate_index_name 之前，delete_in("_all", &[])
+        // 返回 Ok，而其余驱动返回 InvalidIndexName —— 同一个输入两种答案。
+        // 指向必然连不上的地址：真发请求会是 Http 错误，返回 InvalidIndexName
+        // 才说明校验既先于 I/O 也先于短路。
+        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
+        let empty: &[String] = &[];
+        let err = engine.delete_in("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.delete_bulk("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        let err = engine.soft_delete_in("_all", empty).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn update_bulk_validates_every_index_name_before_writing() {
+        // 校验必须覆盖**全部**索引名再发第一条请求：按组边校验边写时，一批里混进
+        // 一个保留索引名，合法那组已经落库、调用方却拿到 Err —— 半途写入。stub
+        // 一条响应都不给：任何一次写入尝试都只会以 Http 错误（连接被拒）收场，
+        // 于是「先写后错」在 InvalidIndexName 这条断言下无法蒙混过关。
+        let (host, seen) = stub(vec![]);
+        let engine = MeilisearchEngine::new(host, None);
+        let mut docs: Vec<SearchDocument> = (0..3)
+            .map(|i| {
+                let mut doc =
+                    SearchDocument::new(format!("ok{i}"), serde_json::json!({"title": "x"}))
+                        .unwrap();
+                doc.index = Some(format!("books{i}"));
+                doc
+            })
+            .collect();
+        let mut reserved = SearchDocument::new("bad", serde_json::json!({"title": "x"})).unwrap();
+        reserved.index = Some("_all".to_string());
+        docs.push(reserved);
+
+        let err = engine.update_bulk(&docs).await.unwrap_err();
+        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
+        assert!(seen.lock().unwrap().is_empty(), "一个写入请求都不该发出去");
+    }
+
+    #[tokio::test]
     async fn failed_write_task_surfaces_as_error() {
         // 回归：POST /documents 只回 202 enqueued，真正的失败（缺主键、字段类型
         // 不符）出现在 /tasks/{uid} 的 status:"failed" 上。不轮询 => update()

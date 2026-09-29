@@ -101,6 +101,7 @@ rust-scout/
 │   └── (Unit-Tests stehen inline am Ende jedes Moduls unter #[cfg(test)] mod tests)
 ├── tests/                  # Integrationstests (derzeit leer, Tests liegen in src)
 ├── examples/
+│   ├── collection_search.rs # cargo run --example collection_search: durchgängiger, lauffähiger Suchablauf
 │   └── pet.rs              # cargo run --example pet: Banner + Fehlerhinweis-Demo
 └── docs/
     ├── svg/                # Maskottchen + Architektur / Funktionen / Design / Lebenszyklus
@@ -128,7 +129,8 @@ Der In-Memory-Treiber ist die semantische Referenz. Kann ein Backend etwas nicht
 | XunSearch | Soft Delete nicht implementiert | `soft_delete` / `soft_delete_in` / `only_trashed` liefern `Unsupported` |
 | XunSearch | Index-Anlage braucht eine Feld-Schema-ini | `create_index` liefert `Unsupported` (ini an `XunSearchEngine::new` übergeben) |
 | Typesense | Nicht-leeres `q` verlangt `query_by` | ohne `.option("query_by", "feld1,feld2")` antwortet das Backend mit 400 `Parameter \`query_by\` is required`; der Treiber rät keinen Feldnamen (ein falscher würde die Rangfolge still verändern) |
-| Meilisearch / Algolia | Schreibvorgänge laufen als Backend-Task | `update` / `update_bulk` / `delete` / `delete_in` pollen den Task-Endpunkt bis zum Endzustand (30 s Obergrenze) und melden einen fehlgeschlagenen Task als Fehler; Bulk-Schreibvorgänge werden dadurch langsamer, verlieren aber keine Daten mehr still |
+| Algolia | Schreibvorgänge laufen als Task: ein POST liefert nur `taskID`, und angenommen ≠ durchsuchbar | `update` / `update_bulk` / `delete` / `delete_in` / `delete_bulk` / `soft_delete_in` / `reindex` pollen `/1/indexes/{index}/task/{taskID}` bis `published`, bevor sie zurückkehren; ohne `published` binnen 30 s ein Fehler (ein unbekanntes Ergebnis wird nicht als Erfolg gemeldet) |
+| Meilisearch | Schreibvorgänge laufen als Task: ein POST liefert nur `taskUid` | gleiche Form gegen `/tasks/{uid}` bis zum Endzustand; ein `failed` / `canceled` Task meldet jetzt einen `Backend`-Fehler (früher wurde ein fehlgeschlagener Schreibvorgang still als Erfolg verworfen), und 30 s ohne Endzustand sind ein Fehler. Bulk-Schreibvorgänge kosten damit „die Laufzeit des Backend-Tasks“ |
 | database | `reindex` **verschiebt** statt zu kopieren | der Quellindex wird geleert (`id` ist der globale Primärschlüssel, dieselbe id kann nicht in zwei Indizes liegen); wer die Quelle behalten will, sollte den database-Treiber nicht nehmen |
 | XunSearch | `index: None` meint jetzt den Index namens `default` | wie bei den anderen sieben Treibern; vorher landete es in der serverseitigen Standard-Datenbank `db` von xunsearchd — mit `index: None` geschriebene Daten sind nur über `index("db")` erreichbar |
 | Standard-Seitengröße | Ohne `take` liefern collection / database **alle** Treffer | die anderen sechs Treiber liefern standardmäßig **10** (üblicher Cap des Backends) |
@@ -148,11 +150,13 @@ Zwei bewusste semantische Angleichungen:
 
 ```toml
 [dependencies]
-rust-scout = "0.7"
+rust-scout = "0.8"
 tokio = { version = "1", features = ["macros", "rt"] }   # nur für dieses Beispiel nötig
 ```
 
 ### 2. Minimalbeispiel (Standard-In-Memory-Treiber)
+
+> Statt Kopieren und Einfügen einfach direkt laufen lassen: `cargo run --example collection_search` — Schreiben → Abfrage (where + Sortierung) → Paginierung → Soft-Delete → Index löschen, die ganze Kette, null features, keine externen Dienste.
 
 ```rust
 use rust_scout::{Engine, EngineManager, ScoutConfig, SearchBuilder, SearchDocument};
@@ -321,6 +325,31 @@ Die Konfigurationskonstruktoren der übrigen Engines stehen auf [docs.rs](https:
 > Soft Deletes / Sortierung / Paginierung laufen im Speicher. Paginierung lässt sich nicht in
 > SQL `LIMIT/OFFSET` schieben – passende Zeilen außerhalb des Fensters blieben unerreichbar.
 
+### Treiber-Konfigurationsschlüssel
+
+Schlüssel in `ScoutConfig::insert` (oder direkt in `options` geschrieben) liest der `EngineManager` beim Aufbau des Treibers:
+
+| Schlüssel | Treiber | Beschreibung |
+|------|----------|---------|
+| `elasticsearch.host` / `opensearch.host` | Elasticsearch / OpenSearch | Standard `http://127.0.0.1:9200` |
+| `elasticsearch.api_key` / `opensearch.api_key` | Elasticsearch / OpenSearch | optional |
+| `meilisearch.host` / `meilisearch.api_key` | Meilisearch | Host-Standard `http://127.0.0.1:7700` |
+| `typesense.host` / `typesense.api_key` | Typesense | Host-Standard `http://127.0.0.1:8108` |
+| `algolia.app_id` / `algolia.api_key` | Algolia | beide Pflicht |
+| `database.url` | SQLite | Pflicht |
+| `database.fields` | SQLite | **nimmt an der Suche nicht mehr teil**, nur noch aus Kompatibilität behalten (und für den nächsten Breaking-Release zur Entfernung vorgesehen). Früher begrenzte er die Textsuche auf die aufgeführten Felder, wodurch `database` bei gleicher Eingabe vom In-Memory-Basisverhalten (`collection`) abwich (`fields=["title"]` + Dokument `{"title":"Rust","tag":"async"}` + Abfrage `"async"` → database 0 Treffer, collection 1); jetzt nimmt das gesamte Dokument am Abgleich teil. Ein leeres Array und das Weglassen des Schlüssels verhalten sich gleich |
+| `xunsearch.host` | XunSearch | Standard `127.0.0.1:8383` |
+| `xunsearch.project` | XunSearch | Standard `default` |
+| `xunsearch.ini` | XunSearch | Pfad zur ini des Feldschemas. Ohne sie gibt `create_index` `Unsupported` zurück und die vnos der Felder lassen sich nur dynamisch raten — die Angabe ist daher empfehlenswert |
+
+> **Timeouts sind fest verdrahtet** und derzeit nicht konfigurierbar: die vier HTTP-Engines 30s pro Anfrage und 10s für den Verbindungsaufbau; das Task-Polling von Meilisearch / Algolia ist auf 30s begrenzt (Poll-Intervall 100ms / 200ms); XunSearch erlaubt 5s pro I/O und 20s für den gesamten Ergebnisstrom.
+> Beachten Sie: `update_bulk` von Elasticsearch zerlegt ab etwa 5MB in mehrere `_bulk`-Anfragen, ein Aufruf kann also insgesamt länger als 30s dauern — die 30s sind ein Limit **pro Anfrage**, nicht für den gesamten Bulk-Vorgang.
+
+> **`options` wird nur von zwei Treibern gelesen**: Elasticsearch (das gesamte Objekt geht in den Anfrage-Body; die drei reservierten Schlüssel `query` / `from` / `size` **führen zu einem Fehler** — sie würden von den gleichnamigen Einstellungen des Builders überschrieben, und sie stillschweigend zu verwerfen lieferte Ihnen ungefilterte Ergebnisse; verwenden Sie stattdessen `.query()` / `.skip()` / `.take()`. `sort` ist die Ausnahme: nur wenn Sie zusätzlich `.order_by()` verwenden, wird es abgelehnt — ein einzelnes `option("sort", …)` wirkt weiterhin unverändert) und Typesense (nur `query_by`, das Pflicht ist, sobald `q` nicht leer ist).
+> Die übrigen sechs Treiber **lesen `options` nicht**; was dort hineingeht, hat keine Wirkung. Genau diese Art von Stille dokumentiert diese Crate nicht unerwähnt — deshalb steht es hier ausdrücklich, statt dass Sie es erst nach der Installation merken.
+
+> **Nur zählen, keine Treffer**: `.take(0)` ist bei jedem Treiber zulässig — `hits` kommt leer zurück, `total` bleibt aber die echte Zahl nach dem Filtern. So fragt man «wie viele Treffer gibt es», ohne Zeilen zu holen.
+
 ### Reservierte Felder
 
 `__soft_deleted` ist der reservierte Feldname der Soft-Delete-Funktion (`Engine::soft_delete_in`,
@@ -339,9 +368,9 @@ Alle Operationen liefern `crate::Result<T>`, die Fehler laufen in einem einheitl
 | `InvalidResult` | Dokumentfeld ist kein JSON-Objekt | eingebaut |
 | `Unsupported` | benötigtes feature ist aus, Pflichtkonfiguration fehlt oder die Engine unterstützt die Operation nicht | eingebaut |
 | `Json` | serde-Serialisierungs- / -Deserialisierungsfehler | eingebaut |
-| `Http` | HTTP-Anfrage fehlgeschlagen (Verbindung, Timeout, Statuscode) | HTTP-Vier-Treiber |
+| `Http` | HTTP-**Transport**fehler: keine Verbindung, Timeout, TLS, Umleitung abgelehnt | HTTP-Vier-Treiber |
 | `Sqlx` | SQLite-Fehler | `database` |
-| `Backend` | das Backend hat mit einem Fehler geantwortet, die Originalmeldung wird durchgereicht | HTTP-Vier-Treiber / `xunsearch` |
+| `Backend` | das Backend hat mit einem Nicht-2xx-Status geantwortet oder selbst einen Fehler gemeldet (ES `timed_out` / fehlgeschlagene Shards, ein Task ohne terminalen Zustand). **Die HTTP-Statuscodes stecken hier** — `429` wie `400` landen in dieser Variante, wer wiederholbar von endgültig unterscheiden will, muss den Meldungstext auswerten (`Backend` reicht ihn bewusst unverändert durch) | HTTP-Vier-Treiber / `xunsearch` |
 | `XunSearch` / `XunSearchIo` | Protokoll-Parsing fehlgeschlagen / TCP-I/O-Fehler | `xunsearch` |
 
 Jede Variante trägt einen Troubleshooting-Hinweis — siehe [`ScoutError::pet_hint()`](#projektmaskottchen).
