@@ -42,7 +42,7 @@ let result = engine.search(
 | 🗑️ 소프트 삭제 | `soft_delete_in(index, ids)` 가 `__soft_deleted` 를 표시하고, `with_trashed()` / `only_trashed()` 로 3상태 필터 |
 | 📦 벌크 작업 | `update_bulk` / `delete_bulk` 로 왕복 감소. `delete_in` 은 지정 색인만 정확히 삭제 |
 | 🔌 교체 가능한 드라이버 | 기본은 의존성 없음. 8가지 백엔드는 각자 feature 로 게이트되어 안 쓰는 것은 컴파일되지 않음 |
-| 🔒 안전 경계 | 색인 이름 검증(`validate_index_name`) + RFC 3986 퍼센트 인코딩으로 경로 주입 차단 |
+| 🔒 안전 경계 | 색인 이름·필드 이름·호스트 검증(`validate_index_name` / `validate_field_name` / `validate_host`) + RFC 3986 퍼센트 인코딩으로 경로 주입 차단 |
 | 🤖 프로젝트 펫 | 검색 로봇 Scout: 터미널 배너 + 에러별 점검 힌트(`rust_scout::pet`) |
 
 ## 아키텍처 설계
@@ -78,14 +78,13 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # crate 루트: 모듈 공개 + feature 게이트 재내보내기
 │   │
-│   ├── engine.rs           # Engine trait: 유일한 드라이버 계약 (필수 6 + 기본 구현 8)
+│   ├── engine.rs           # Engine trait: 유일한 드라이버 계약 (필수 6 + 기본 구현 7)
 │   ├── manager.rs          # EngineManager: 파사드, driver 로 분기하고 Arc<dyn Engine> 캐시
 │   ├── config.rs           # ScoutConfig (생성자 9개) + validate_index_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: 체인 쿼리
 │   ├── document.rs         # SearchDocument: 쓰기 문서 (serde JSON 계약)
 │   ├── result.rs           # SearchResult / SearchHit: 검색 결과
-│   ├── searchable.rs       # Searchable / SearchableStore: 비즈니스 모델 브리지
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # 프로젝트 펫: 검색 로봇 Scout (배너 + 에러 힌트)
 │   │
@@ -115,6 +114,8 @@ rust-scout/
 
 > `[feature]` 는 해당 드라이버에 필요한 Cargo feature 를 뜻한다. 활성화되지 않으면
 > `EngineManager` 는 조용히 성능을 떨어뜨리는 대신 `ScoutError::Unsupported` 를 반환한다.
+> 알 수 없는 `driver` 문자열(오타, 끝의 공백, `OpenSearch` 같은 대소문자 오류)도 오류다 —
+> 예전에는 조용히 메모리 드라이버로 떨어졌다.
 
 ### 드라이버 능력 차이
 
@@ -126,8 +127,12 @@ rust-scout/
 | Algolia | 정렬에는 미리 만들어 둔 레플리카 색인이 필요하고, 쿼리마다 고를 수는 없다 | `order_by` 는 **무시된다**(결과는 그대로 반환되고 순서만 정해지지 않음) |
 | XunSearch | `where_in` / `where_not_in` 에 해당하는 프로토콜 명령이 없다 | `Unsupported` 를 반환; `where_field` 를 사용 |
 | XunSearch | 서버가 지원하는 정렬 필드는 하나뿐 | `order_by` 를 여러 개 주면 `Unsupported` 를 반환 |
-| XunSearch | 소프트 삭제 미구현 | `soft_delete` / `only_trashed` 는 `Unsupported` 를 반환 |
+| XunSearch | 소프트 삭제 미구현 | `soft_delete` / `soft_delete_in` / `only_trashed` 는 `Unsupported` 를 반환 |
 | XunSearch | 색인 생성에는 필드 스킴 ini 가 필요 | `create_index` 는 `Unsupported` 를 반환(`XunSearchEngine::new` 에 ini 전달) |
+| Typesense | 비어 있지 않은 `q` 에는 `query_by` 가 필수 | `.option("query_by", "field1,field2")` 를 넘기지 않으면 백엔드가 400 `Parameter \`query_by\` is required` 를 반환; 드라이버는 필드를 추측하지 않는다(잘못 추측하면 순위가 조용히 바뀐다) |
+| Meilisearch / Algolia | 쓰기는 백엔드의 태스크로 처리된다 | `update` / `update_bulk` / `delete` / `delete_in` 은 태스크 엔드포인트를 종료 상태까지 폴링하고(최대 30초) 태스크가 실패하면 오류를 반환한다; 벌크 쓰기는 느려지지만 데이터가 조용히 사라지지는 않는다 |
+| database | `reindex` 는 복사가 아니라 **이동** | 원본 색인이 비워진다(`id` 가 전역 기본 키라 같은 id 가 두 색인에 있을 수 없다); 원본을 남기려면 database 드라이버를 쓰지 말 것 |
+| XunSearch | `index: None` 은 이제 `default` 라는 이름의 색인을 뜻한다 | 나머지 일곱 드라이버와 같다; 예전에는 xunsearchd 서버의 기본 데이터베이스 `db` 로 떨어졌다 —— `index: None` 으로 쓴 데이터는 `index("db")` 를 넘겨야 찾을 수 있다 |
 | 기본 개수 | `take` 를 지정하지 않으면 collection / database 는 **모든** 히트를 반환 | 나머지 여섯 드라이버는 기본적으로 **10** 개만 반환(각 백엔드의 관례적 상한) |
 
 의도적으로 맞춘 의미론이 두 가지 있다:
@@ -232,7 +237,7 @@ engine.update_bulk(&docs).await?;                              // 벌크 쓰기 
 engine.flush("books").await?;                                  // 가시성 갱신
 engine.search(&builder).await?;                                // 검색
 engine.delete_in("books", &["book-1".to_string()]).await?;     // 색인을 지정해 문서 삭제
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // 소프트 삭제 (플래그 표시)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // 소프트 삭제 (플래그 표시; XunSearch: Unsupported)
 engine.reindex("books", "books_v2").await?;                    // 색인 재구축
 engine.delete_index("books").await?;                           // 색인 삭제
 ```
@@ -240,10 +245,11 @@ engine.delete_index("books").await?;                           // 색인 삭제
 > `delete` 는 색인 정보를 갖지 않으므로 의미가 엔진마다 다르다(메모리 드라이버는 색인을 가로질러
 > 삭제하고, ES 는 `default` 색인만 본다). 특정 색인으로 한정하려면 `delete_in` 을 사용한다.
 >
-> 소프트 삭제도 마찬가지다: **`soft_delete_in(index, ids)` 가 엔진을 가리지 않고 믿을 수 있는
-> 쪽이다**. 색인을 지정하지 않는 `soft_delete` 는 동기 백엔드(`collection` / `database`)만
-> 색인을 가로질러 표시할 수 있다; HTTP 백엔드는 못 하고 `ScoutError::Unsupported` 를
-> 반환한다(조용히 아무것도 하지 않는 것이 아니라).
+> 소프트 삭제도 마찬가지다: `soft_delete_in(index, ids)` 는 여덟 중 일곱 엔진에서 믿을 수 있는
+> 경로다 — **XunSearch 는 `soft_delete` 도 `soft_delete_in` 도 구현하지 않았고**, 둘 다
+> `ScoutError::Unsupported` 를 반환한다. 색인을 지정하지 않는 `soft_delete` 는 동기 백엔드
+> (`collection` / `database`)만 색인을 가로질러 표시할 수 있다; HTTP 백엔드는 못 하고
+> `ScoutError::Unsupported` 를 반환한다(조용히 아무것도 하지 않는 것이 아니라).
 >
 > `flush` 의 계약은 "쓰기 가시성 갱신"이고, **어떤 드라이버도 색인을 비우지 않는다**:
 > ES 는 `_refresh` 를, XunSearch 는 `CMD_INDEX_COMMIT` 을 보내며, 나머지 드라이버는 쓰기가
@@ -325,7 +331,9 @@ let engine = EngineManager::new(config).engine()?;
 
 | 변형 | 발생 상황 | feature |
 |------|----------|---------|
-| `InvalidIndexName` | 색인 이름에 공백 / `/` / `\` 포함, `.` 로 시작, 또는 빈 문자열 (쓰기 전 검증) | 내장 |
+| `InvalidIndexName` | 색인 이름에 공백 / `/` / `\` / `"` / `'` / `;` / `` ` `` 포함, 빈 문자열, `.` / `-` / `_` 로 시작, 또는 와일드카드 / 다중 색인 문자(`*` `?` `,` `+`) 포함 (쓰기 전 검증) | 내장 |
+| `InvalidHost` | 호스트에 자격 증명이 포함됨(`http://user:pass@host`); 오류 메시지에 호스트를 되풀이하지 않는다 | 내장 |
+| `InvalidFieldName` | 필터 / 정렬 필드 이름에 공백이나 연산자 문자가 있음; 영숫자, `_`, `-`, `.` 만 허용 | 내장 |
 | `InvalidResult` | 문서 필드가 JSON 객체가 아님 | 내장 |
 | `Unsupported` | 드라이버에 필요한 feature 비활성, 필수 설정 누락, 엔진이 지원하지 않는 작업 | 내장 |
 | `Json` | serde 직렬화 / 역직렬화 오류 | 내장 |
@@ -336,23 +344,16 @@ let engine = EngineManager::new(config).engine()?;
 
 모든 변형이 점검 힌트를 함께 갖는다. 자세한 내용은 [`ScoutError::pet_hint()`](#프로젝트-펫) 참고.
 
-### 비즈니스 모델 브리지(Searchable)
-
-`Searchable` 을 구현해 비즈니스 구조를 색인 가능한 문서로 매핑하고, `SearchableStore` 를 구현해
-`index_documents` / `remove_documents` / `search` 세 작업을 감싼다:
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **보안 경계.** 자격 증명이 들어간 호스트(`http://user:pass@host`)는 거부된다(`InvalidHost`) —
+> reqwest 오류 `Display` 가 URL 전체를 덧붙이므로 한 번만 실패해도 비밀번호가 로그에 남는다.
+> 리디렉션은 **동일 출처**(scheme·host·port 가 모두 같음)일 때만 따른다. reqwest 는 호스트가
+> 바뀌어도 표준 인증 헤더만 제거하고 `X-TYPESENSE-API-KEY` / `X-Algolia-API-Key` 는 그대로
+> 다른 호스트로 보내지기 때문이다. 흔한 결과 하나: 리디렉션된 POST 는 본문 없이 GET 으로
+> 도착할 수 있다(RFC 7231). 쓰기 경로를 리디렉션하는 리버스 프록시는 투명하지 않다는 뜻이다.
+> 필터 / 정렬 필드 이름은 `validate_field_name` 을 거친다(영숫자, `_`, `-`, `.` 만 허용;
+> `author.name` 과 비 ASCII 이름은 계속 쓸 수 있다). 또한 `ScoutConfig` 의 `Debug` 는 비밀을
+> 가리고(`*.api_key` / `*secret*` / `*password*` / `*token` 은 `"<redacted>"`), `Serialize` 는
+> 그대로 출력한다 — 로그에는 `{:?}` 를 쓰고 `serde_json::to_string` 은 쓰지 말 것.
 
 ## 프로젝트 펫
 
@@ -424,8 +425,8 @@ eprintln!("{}", pet::format_error(&err));
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="WeChat 후원" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="Alipay 후원" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="WeChat 후원" width="130"/>
+<img src="../../../docs/alipay.png" alt="Alipay 후원" width="130"/>
 
 WeChat 스캔 · Alipay 스캔
 
@@ -433,16 +434,16 @@ WeChat 스캔 · Alipay 스캔
 
 | 메인넷 | 지갑 주소 | QR 코드 |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### 해외 송금(은행 이체)
 

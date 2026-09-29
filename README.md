@@ -27,6 +27,11 @@ let result = engine.search(
 ).await?;
 ```
 
+> Typesense 例外：`q` 非空时后端**强制**要求 `query_by`，上面的写法在该驱动上会被
+> 400 拒绝（``Parameter `query_by` is required.``）——补一个
+> `.option("query_by", "title,body")` 指定检索字段即可。驱动不替调用方猜字段，
+> 猜错会静默改变排序。其余七个驱动无此要求，详见[驱动能力差异](#驱动能力差异)。
+
 ## 功能特性
 
 | 能力 | 说明 |
@@ -41,7 +46,7 @@ let result = engine.search(
 | 🗑️ 软删除 | `soft_delete_in(index, ids)` 打 `__soft_deleted` 标记，`with_trashed()` / `only_trashed()` 三态过滤 |
 | 📦 批量操作 | `update_bulk` / `delete_bulk` 减少往返；`delete_in` 精确到指定索引删除 |
 | 🔌 可插拔驱动 | 默认内存零依赖；8 种后端各自 feature 门控，按需引入不用的不编译 |
-| 🔒 安全边界 | 索引名校验（`validate_index_name`）+ RFC 3986 百分号编码，杜绝路径注入 |
+| 🔒 安全边界 | 索引名 / 字段名 / host 校验（`validate_index_name` / `validate_field_name` / `validate_host`）+ RFC 3986 百分号编码，杜绝路径注入与表达式改写 |
 | 🤖 项目宠物 | 检索机器人 Scout：终端横幅 + 逐错误的排查提示（`rust_scout::pet`） |
 
 ## 架构设计
@@ -77,14 +82,13 @@ rust-scout/
 ├── src/
 │   ├── lib.rs              # crate 根：模块导出 + feature 门控的公开类型再导出
 │   │
-│   ├── engine.rs           # Engine trait：唯一的驱动契约（6 必需 + 8 默认实现）
+│   ├── engine.rs           # Engine trait：唯一的驱动契约（6 必需 + 7 默认实现）
 │   ├── manager.rs          # EngineManager：门面，按 driver 分发并缓存 Arc<dyn Engine>
-│   ├── config.rs           # ScoutConfig（9 个构造器，含 opensearch 别名）+ validate_index_name + percent_encode
+│   ├── config.rs           # ScoutConfig（9 个构造器，含 opensearch 别名）+ validate_index_name / validate_host / validate_field_name + percent_encode
 │   │
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter：链式查询
 │   ├── document.rs         # SearchDocument：写入文档（serde JSON 契约）
 │   ├── result.rs           # SearchResult / SearchHit：查询结果
-│   ├── searchable.rs       # Searchable / SearchableStore：业务模型桥接
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # 项目宠物：检索机器人 Scout（横幅 + 错误提示）
 │   │
@@ -114,26 +118,47 @@ rust-scout/
 
 > `[feature]` 标注的是该驱动所需的 Cargo feature；未启用时
 > `EngineManager` 会返回 `ScoutError::Unsupported`，而不是静默降级。
+>
+> `driver` 字符串认不出来时**同样报错**（``unknown engine driver `...` ``），不回退到
+> 内存驱动：`"meilisearch "`（尾空格）、`"OpenSearch"`（大小写不对）这类配置笔误
+> 会在启动时直接暴露，而不是变成一个跑得起来、却什么都不落盘的引擎。
 
 ### 驱动能力差异
 
-默认内存驱动是语义基准；下列后端做不到的部分会**显式报错**，而不是静默给出错误结果：
+默认内存驱动是语义基准；下列后端做不到、或约束与基准不同的部分都会**显式报错或
+显式标注**，而不是静默给出错误结果：
 
 | 驱动 | 限制 | 表现 |
 |------|------|------|
 | Algolia | 排序需预先建 replica index，客户端无法临时指定 | `order_by` **被忽略**（结果仍返回，只是顺序不保证） |
+| Algolia | 写入是任务制：POST 只回 `taskID`，请求被受理 ≠ 记录可搜索 | `update` / `update_bulk` / `delete` / `delete_in` / `delete_bulk` / `soft_delete_in` / `reindex` 轮询 `/1/indexes/{index}/task/{taskID}` 到 `published` 才返回；30s 未发布报错（结果未知时不谎报成功） |
+| Meilisearch | 写入是任务制：POST 只回 `taskUid` | 同上，轮询 `/tasks/{uid}` 到终态；`failed` / `canceled` 的任务现在会报 `Backend` 错误（此前写入失败被静默当成功丢弃），30s 未结束报错。批量写入的耗时因此变成「等后端任务跑完」 |
+| Typesense | `q` 非空时后端强制要求 `query_by` | 没传 `.option("query_by", "title,body")` 会被 400 拒绝；驱动不替调用方猜字段——猜错会静默改变排序 |
 | XunSearch | `where_in` / `where_not_in` 无对应协议命令 | 返回 `Unsupported`，请用 `where_field` |
 | XunSearch | 服务端只支持单字段排序 | 多个 `order_by` 返回 `Unsupported` |
-| XunSearch | 未实现软删除 | `soft_delete` / `only_trashed` 返回 `Unsupported` |
+| XunSearch | 未实现软删除 | `soft_delete` / `soft_delete_in` / `only_trashed` 全部返回 `Unsupported` |
+| XunSearch | `index: None` ≡ 索引名 `default`（与其余七个驱动一致） | 此前落到 xunsearchd 服务端的默认库 `db`：用 `index: None` 写下的旧数据要显式 `index("db")` 才读得到 |
 | XunSearch | 建索引需要字段方案 ini | `create_index` 返回 `Unsupported`（改用 `XunSearchEngine::new` 传 ini） |
+| Database | `reindex` 是**移动**不是复制 | `from` 索引会被清空：表里 `id` 是全局主键，同一 id 无法同属两个索引。其余驱动 `from` 保持不变 |
 | 默认条数 | 不传 `take` 时 collection / database 返回**全部**命中 | 其余六个驱动默认只返回 **10** 条（沿用各自后端的惯例上限） |
 
-另外两处刻意的语义对齐：
+另外几处刻意的语义对齐：
 
 - **ES 收到畸形查询语法**（如 `"("`、`"foo AND"`）时返回空结果而非报错 ——
   内存驱动对同样输入是子串匹配，报 400 会破坏「换后端不改代码」。
 - **`delete` 与 `soft_delete` 不带索引信息**，跨索引与否因后端而异；
   要精确到某个索引请一律用 `delete_in` / `soft_delete_in`。
+- **四个 HTTP 驱动只跟随同源重定向**（scheme + host + port 三者全等）：reqwest
+  换 host 时只摘 `Authorization` / `Cookie` 等已知头，**自定义认证头不动** ——
+  Typesense 的 `X-TYPESENSE-API-KEY`、Algolia 的 `X-Algolia-API-Key` 会被一个
+  `302 http://evil/` 原样带走。同源的补尾斜杠跳转照常跟随；但反向代理若跨源
+  重定向写请求，POST 会按 RFC 7231 降级成**不带 body 的 GET**。
+- **host 不接受内嵌凭据**：`http://user:pass@host` 返回
+  `ScoutError::InvalidHost`（reqwest 的错误 `Display` 会拼出完整 URL，请求失败
+  一次密码就跟着进日志），凭据请走驱动自己的参数。
+- **四个 HTTP 驱动都用异步 `reqwest::Client`**：Elasticsearch 自 0.7 起不再用
+  `reqwest::blocking` —— 阻塞版在 tokio 运行时里调用会 panic（内部临时 runtime
+  的析构不允许），release 下也会占死一个工作线程。
 
 ## 快速开始
 
@@ -142,7 +167,7 @@ rust-scout/
 ```toml
 [dependencies]
 rust-scout = "0.7"
-tokio = { version = "1", features = ["macros", "rt"] }   # 仅示例需要
+tokio = { version = "1", features = ["macros", "rt"] }   # 示例需要；meilisearch / algolia 的任务轮询也依赖 tokio 定时器
 ```
 
 ### 2. 最小示例（默认内存驱动）
@@ -230,20 +255,25 @@ engine.flush("books").await?;                                  // 刷新可见�
 engine.search(&builder).await?;                                // 查询
 engine.delete_in("books", &["book-1".to_string()]).await?;     // 精确到索引删文档
 engine.soft_delete_in("books", &["book-2".to_string()]).await?;  // 软删除（打标记）
-engine.reindex("books", "books_v2").await?;                    // 重建索引
+engine.reindex("books", "books_v2").await?;                    // 重建索引（database 驱动是「移动」，源索引会被清空）
 engine.delete_index("books").await?;                           // 删索引
 ```
 
 > `delete` 不带索引信息，语义因引擎而异（内存驱动跨索引删，ES 只看 `default`
 > 索引）。要精确到某个索引请用 `delete_in`。
 >
-> 软删除同理：**`soft_delete_in(index, ids)` 是跨引擎都可靠的那个**。
+> 软删除同理：**带索引的 `soft_delete_in(index, ids)` 覆盖面最广** —— 但 XunSearch
+> 两个都没实现（`soft_delete` / `soft_delete_in` 都返回 `Unsupported`）。
 > 不带索引的 `soft_delete` 只有同步后端（`collection` / `database`）能跨索引标记；
 > HTTP 后端做不到，会返回 `ScoutError::Unsupported`（而不是静默什么都不做）。
 >
 > `flush` 的契约是「刷新写入可见性」，**任何驱动都不会清空索引**：ES 走
 > `_refresh`，XunSearch 发 `CMD_INDEX_COMMIT`，其余驱动写入即时可见、为 no-op。
-> 要清空索引请用 `delete_index`。
+> 要清空索引请用 `delete_index`（`database` 驱动现在会真的按索引删行，此前是
+> 静默 no-op）。
+>
+> `reindex` 在 `database` 驱动上是**移动**而不是复制：`from` 会被清空，因为表里
+> `id` 是全局主键、同一 id 无法同时属于两个索引。其余驱动 `from` 保持不变。
 
 ### 切换到 Elasticsearch / OpenSearch
 
@@ -264,7 +294,7 @@ let engine = EngineManager::new(config).engine()?;
 
 | 对照项 | CollectionEngine（默认） | ElasticsearchEngine |
 |--------|--------------------------|---------------------|
-| 依赖 | 仅 serde / thiserror | reqwest（feature 启用） |
+| 依赖 | 仅 serde / thiserror | reqwest 异步 client（feature 启用） |
 | 全文 | 序列化子串匹配 | `query_string` |
 | 过滤 | 内存 matches() | term / terms / must_not |
 | 排序 | 内存 sort_hits() | sort 数组 |
@@ -304,6 +334,11 @@ let engine = EngineManager::new(config).engine()?;
 
 其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
+> `ScoutConfig` 的 `Debug` 会把密钥打码：`options` 里 `*.api_key` / `*secret*` /
+> `*password*` / `*token` 一律渲染成 `"<redacted>"`，`println!("{:?}", config)`
+> 不会漏凭据。但 `Serialize` **仍按原样输出** —— 序列化是写配置文件的正路径，
+> 打码会破坏读回。要打日志请用 `{:?}`，别用 `serde_json::to_string(&config)`。
+
 > SQLite 引擎（`database`）的 `total` 是**过滤后**的命中数（与 `CollectionEngine`
 > 一致）：SQL 只做索引 + LIKE 粗筛把候选集取回，wheres / 软删 / 排序 / 分页都在
 > 内存完成。分页不能下推到 SQL 的 `LIMIT/OFFSET`——那样窗口外的匹配行会永远
@@ -321,7 +356,9 @@ let engine = EngineManager::new(config).engine()?;
 
 | 变体 | 触发场景 | feature |
 |------|----------|---------|
-| `InvalidIndexName` | 索引名含空白 / `/` / `\`，或以 `.` 开头，或为空；或含 `*` `?` `,` `+` 等通配/多索引字符，或以前导 `-` `_` 开头（写入前校验） | 内置 |
+| `InvalidIndexName` | 索引名含空白 / `/` / `\` / `"` / `'` / `;` / `` ` ``，或以 `.` 开头，或为空；或含 `*` `?` `,` `+` 等通配/多索引字符，或以前导 `-` `_` 开头（写入前校验） | 内置 |
+| `InvalidHost` | host 内嵌了 userinfo（`user:pass@host`）；错误信息不回显原 host，避免换个地方泄漏 | 内置 |
+| `InvalidFieldName` | 过滤 / 排序字段名含空白或运算符字符（只允许字母、数字、`_` `-` `.`，非 ASCII 字母数字如 `价格` 可用）。字段名是拼进表达式文本的：值转义而字段名曾裸拼，一个 `where_field("x:=1 \|\| y", ..)` 足以把软删除守卫 OR 掉 | 内置 |
 | `InvalidResult` | 文档字段不是 JSON 对象 | 内置 |
 | `Unsupported` | 驱动所需 feature 未启用、缺少必需配置、引擎不支持该操作 | 内置 |
 | `Json` | serde 序列化 / 反序列化错误 | 内置 |
@@ -331,24 +368,6 @@ let engine = EngineManager::new(config).engine()?;
 | `XunSearch` / `XunSearchIo` | 协议解析失败 / TCP I/O 失败 | `xunsearch` |
 
 每个变体都带一条排查提示，见 [`ScoutError::pet_hint()`](#项目宠物)。
-
-### 桥接业务模型（Searchable）
-
-实现 `Searchable` 把业务结构映射为可索引文档，实现 `SearchableStore` 封装
-`index_documents` / `remove_documents` / `search` 三个操作：
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
 
 ## 项目宠物
 
@@ -420,8 +439,8 @@ eprintln!("{}", pet::format_error(&err));
 
 ### 微信 / 支付宝
 
-<img src="docs/weixinpay.png" alt="微信打赏" width="130" height="130"/>
-<img src="docs/alipay.png" alt="支付宝打赏" width="130" height="130"/>
+<img src="docs/weixinpay.png" alt="微信打赏" width="130"/>
+<img src="docs/alipay.png" alt="支付宝打赏" width="130"/>
 
 微信扫码 · 支付宝扫码
 
@@ -429,16 +448,16 @@ eprintln!("{}", pet::format_error(&err));
 
 | 主网 | 钱包地址 | 二维码 |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/10.jpg" width="130"/> |
 
 ### 全球转账（银行汇款）
 

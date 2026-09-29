@@ -14,13 +14,29 @@ fn filter_value(v: &Value) -> String {
     }
 }
 
+/// `id:=[...]` 删除过滤器（delete-by-query 用）。值走同一个 [`filter_value`] 转义。
+pub(crate) fn id_filter(ids: &[String]) -> String {
+    let list = ids
+        .iter()
+        .map(|id| filter_value(&Value::String(id.clone())))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("id:=[{}]", list)
+}
+
 /// 等值/IN/软删除 → filter_by 表达式（` && ` 连接）；无任何条件时返回 None。
-pub(crate) fn build_filter_by(builder: &SearchBuilder) -> Option<String> {
+///
+/// 字段名先过 [`crate::validate_field_name`]：表达式是文本拼接，值转了义而字段名
+/// 曾经裸拼，`where_field("x:=1 || y", "z")` 能改写整条表达式——`&&` 优先级更高，
+/// 本函数追加的 `__soft_deleted:!=true` 守卫会被 OR 掉。
+pub(crate) fn build_filter_by(builder: &SearchBuilder) -> crate::Result<Option<String>> {
     let mut parts: Vec<String> = Vec::new();
     for w in &builder.wheres {
+        crate::validate_field_name(&w.field)?;
         parts.push(format!("{}:={}", w.field, filter_value(&w.value)));
     }
     for (field, values) in &builder.where_ins {
+        crate::validate_field_name(field)?;
         let list = values.iter().map(filter_value).collect::<Vec<_>>().join(", ");
         parts.push(format!("{}:=[{}]", field, list));
     }
@@ -28,6 +44,7 @@ pub(crate) fn build_filter_by(builder: &SearchBuilder) -> Option<String> {
         if values.is_empty() {
             continue; // 空 NOT IN 集合 = 无过滤（Collection 语义，与 Algolia 一致）
         }
+        crate::validate_field_name(field)?;
         let list = values.iter().map(filter_value).collect::<Vec<_>>().join(", ");
         parts.push(format!("{}:!=[{}]", field, list));
     }
@@ -40,22 +57,23 @@ pub(crate) fn build_filter_by(builder: &SearchBuilder) -> Option<String> {
         TrashedFilter::WithTrashed => {}
     }
     if parts.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(parts.join(" && "))
+        Ok(Some(parts.join(" && ")))
     }
 }
 
-fn build_sort_by(builder: &SearchBuilder) -> Option<String> {
+fn build_sort_by(builder: &SearchBuilder) -> crate::Result<Option<String>> {
     if builder.orders.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let parts: Vec<String> = builder
-        .orders
-        .iter()
-        .map(|o| format!("{}:{}", o.field, if o.desc { "desc" } else { "asc" }))
-        .collect();
-    Some(parts.join(","))
+    let mut parts: Vec<String> = Vec::new();
+    for o in &builder.orders {
+        // 同 filter_by：`sort_by` 也是 `field:asc` 文本拼接，字段名要校验。
+        crate::validate_field_name(&o.field)?;
+        parts.push(format!("{}:{}", o.field, if o.desc { "desc" } else { "asc" }));
+    }
+    Ok(Some(parts.join(",")))
 }
 
 /// `skip`/`take` → `offset`/`limit`。`skip` 精确映射到 `offset`，**不**折算成页：
@@ -77,10 +95,19 @@ pub(crate) fn page_offset(page: usize, per_page: usize) -> (usize, usize) {
 }
 
 /// GET 搜索 query 参数；q 为空时省略 q/query_by（Typesense 空串匹配全部）。
+///
+/// 注意：**q 非空时 Typesense 强制要求 `query_by`**，只发 q 会被后端以
+/// 400 `Parameter \`query_by\` is required` 拒绝。这里不替调用方兜底补一个字段
+/// （猜错字段会返回静默错误的排序），只保证错误信息里带着参数名。见 README。
+///
 /// 分页用 `offset`/`limit`（`page`/`per_page` 的替代写法，两者不可混用）：
 /// 后者只能表达页对齐的起点，会丢掉 `skip` 的余数。
 /// `limit` > 250 会报错（`per_page` 上限），由调用方约束。
-pub(crate) fn search_params(builder: &SearchBuilder, offset: usize, limit: usize) -> Vec<(String, String)> {
+pub(crate) fn search_params(
+    builder: &SearchBuilder,
+    offset: usize,
+    limit: usize,
+) -> crate::Result<Vec<(String, String)>> {
     let mut params = Vec::new();
     if !builder.query.is_empty() {
         params.push(("q".to_string(), builder.query.clone()));
@@ -88,15 +115,15 @@ pub(crate) fn search_params(builder: &SearchBuilder, offset: usize, limit: usize
             params.push(("query_by".to_string(), query_by.to_string()));
         }
     }
-    if let Some(filter) = build_filter_by(builder) {
+    if let Some(filter) = build_filter_by(builder)? {
         params.push(("filter_by".to_string(), filter));
     }
     params.push(("limit".to_string(), limit.to_string()));
     params.push(("offset".to_string(), offset.to_string()));
-    if let Some(sort) = build_sort_by(builder) {
+    if let Some(sort) = build_sort_by(builder)? {
         params.push(("sort_by".to_string(), sort));
     }
-    params
+    Ok(params)
 }
 
 /// 文档 → NDJSON 行；`id` 键统一注入/覆盖为 doc.id，每行以 `\n` 结尾。
@@ -188,16 +215,51 @@ mod tests {
         let builder = SearchBuilder::new("").where_field("title", "a").where_field("count", 5)
             .where_field("active", true).where_in("tag", ["x", "y"]).where_not_in("tag", ["z"]);
         assert_eq!(
-            build_filter_by(&builder).unwrap(),
+            build_filter_by(&builder).unwrap().unwrap(),
             r#"title:="a" && count:=5 && active:=true && tag:=["x", "y"] && tag:!=["z"] && __soft_deleted:!=true"#
         );
     }
 
     #[test]
     fn filter_by_trashed_variants() {
-        assert_eq!(build_filter_by(&SearchBuilder::new("")).unwrap(), "__soft_deleted:!=true");
-        assert_eq!(build_filter_by(&SearchBuilder::new("").only_trashed()).unwrap(), "__soft_deleted:=true");
-        assert_eq!(build_filter_by(&SearchBuilder::new("").with_trashed()), None);
+        assert_eq!(build_filter_by(&SearchBuilder::new("")).unwrap().unwrap(), "__soft_deleted:!=true");
+        assert_eq!(
+            build_filter_by(&SearchBuilder::new("").only_trashed()).unwrap().unwrap(),
+            "__soft_deleted:=true"
+        );
+        assert_eq!(build_filter_by(&SearchBuilder::new("").with_trashed()).unwrap(), None);
+    }
+
+    #[test]
+    fn operator_chars_in_field_name_are_rejected() {
+        // 回归：字段名曾经裸拼进 filter_by/sort_by。`x:=1 || y` 会让 `&&` 优先级
+        // 反客为主，把软删除守卫 OR 掉，从而把已软删的文档一起查出来。
+        let b = SearchBuilder::new("").where_field("x:=1 || y", "z");
+        assert!(matches!(
+            build_filter_by(&b),
+            Err(crate::ScoutError::InvalidFieldName(_))
+        ));
+        let b = SearchBuilder::new("").where_in("a && __soft_deleted:=true", ["1"]);
+        assert!(build_filter_by(&b).is_err());
+        let b = SearchBuilder::new("").where_not_in("a,b", ["1"]);
+        assert!(build_filter_by(&b).is_err());
+        let b = SearchBuilder::new("").order_by("price:asc,__soft_deleted", true);
+        assert!(search_params(&b, 0, 10).is_err());
+        // 合法字段名不受影响：点号（嵌套）与中文列名照常。
+        let ok = SearchBuilder::new("").where_field("author.name", "x").order_by("价格", false);
+        assert_eq!(
+            build_filter_by(&ok).unwrap().unwrap(),
+            r#"author.name:="x" && __soft_deleted:!=true"#
+        );
+    }
+
+    #[test]
+    fn id_filter_batches_ids_with_escaped_values() {
+        // delete-by-query 的过滤器：id 也要走 filter_value 转义（`"`/`\`）。
+        assert_eq!(
+            id_filter(&["a".to_string(), "b\"c".to_string()]),
+            r#"id:=["a", "b\"c"]"#
+        );
     }
 
     #[test]
@@ -205,7 +267,7 @@ mod tests {
         let builder = SearchBuilder::new("needle").where_field("active", true)
             .order_by("price", true).option("query_by", "title,body");
         let map: std::collections::HashMap<String, String> =
-            search_params(&builder, 2, 10).into_iter().collect();
+            search_params(&builder, 2, 10).unwrap().into_iter().collect();
         assert_eq!(map["q"], "needle");
         assert_eq!(map["query_by"], "title,body");
         assert_eq!(map["filter_by"], "active:=true && __soft_deleted:!=true");
@@ -238,7 +300,7 @@ mod tests {
     #[test]
     fn search_params_omit_q_and_filter_when_empty() {
         let map: std::collections::HashMap<String, String> =
-            search_params(&SearchBuilder::new("").with_trashed(), 1, 10).into_iter().collect();
+            search_params(&SearchBuilder::new("").with_trashed(), 1, 10).unwrap().into_iter().collect();
         assert!(!map.contains_key("q"));
         assert!(!map.contains_key("query_by"));
         assert!(!map.contains_key("filter_by"));
@@ -303,7 +365,7 @@ mod tests {
     #[test]
     fn empty_not_in_is_dropped_but_empty_in_matches_nothing() {
         let b = SearchBuilder::new("q").where_not_in("cat", Vec::<&str>::new());
-        let f = build_filter_by(&b).unwrap_or_default();
+        let f = build_filter_by(&b).unwrap().unwrap_or_default();
         assert!(!f.contains("cat:!="), "空 NOT IN 不该下发: {f:?}");
     }
 

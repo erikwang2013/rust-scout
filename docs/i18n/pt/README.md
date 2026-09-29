@@ -38,7 +38,7 @@ let result = engine.search(
 | 🗑️ Eliminação lógica | `soft_delete_in(index, ids)` marca `__soft_deleted`; filtro tri-estado `with_trashed()` / `only_trashed()` |
 | 📦 Operações em lote | `update_bulk` / `delete_bulk` reduzem idas e voltas; `delete_in` aponta a um índice exato |
 | 🔌 Drivers plugáveis | Em memória por padrão, zero dependências; 8 backends com feature própria — o que não se usa não compila |
-| 🔒 Limite de segurança | Validação do nome do índice (`validate_index_name`) + codificação percentual RFC 3986 contra injeção de caminho |
+| 🔒 Limite de segurança | Validação de nome de índice, de campo e de host (`validate_index_name` / `validate_field_name` / `validate_host`) + codificação percentual RFC 3986 contra injeção de caminho |
 | 🤖 Mascote do projeto | Scout, o Robô de Busca: faixa de terminal + sugestões de diagnóstico erro a erro (`rust_scout::pet`) |
 
 ## Arquitetura
@@ -82,7 +82,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: consultas encadeadas
 │   ├── document.rs         # SearchDocument: o documento escrito (contrato serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: resultados da consulta
-│   ├── searchable.rs       # Searchable / SearchableStore: ponte para modelos de negócio
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # Mascote do projeto: Scout, o Robô de Busca (faixa + sugestões)
 │   │
@@ -112,6 +111,8 @@ rust-scout/
 
 > A etiqueta `[feature]` indica a feature de Cargo de que o driver precisa. Quando está
 > desligada, o `EngineManager` devolve `ScoutError::Unsupported` em vez de degradar em silêncio.
+> Um `driver` desconhecido (gralha, espaço no fim, maiúsculas erradas como `OpenSearch`) também
+> é erro — antes caía em silêncio no driver em memória.
 
 ### Diferenças de capacidades entre drivers
 
@@ -123,8 +124,12 @@ fazer algo, ele **diz isso explicitamente** em vez de devolver em silêncio resu
 | Algolia | A ordenação exige índices réplica pré-construídos; não dá para escolher por consulta | `order_by` é **ignorado** (os resultados até vêm, só a ordem fica indefinida) |
 | XunSearch | Sem comando de protocolo para `where_in` / `where_not_in` | devolve `Unsupported`; use `where_field` |
 | XunSearch | O servidor aceita apenas um campo de ordenação | vários `order_by` devolvem `Unsupported` |
-| XunSearch | Eliminação lógica não implementada | `soft_delete` / `only_trashed` devolvem `Unsupported` |
+| XunSearch | Eliminação lógica não implementada | `soft_delete` / `soft_delete_in` / `only_trashed` devolvem `Unsupported` |
 | XunSearch | Criar um índice exige um ini de esquema de campos | `create_index` devolve `Unsupported` (passe um ini a `XunSearchEngine::new`) |
+| Typesense | Um `q` não vazio exige `query_by` | sem `.option("query_by", "campo1,campo2")` o backend responde 400 `Parameter \`query_by\` is required`; o driver não adivinha nenhum campo (um palpite errado mudaria a ordem em silêncio) |
+| Meilisearch / Algolia | As escritas correm como tarefa (task) do backend | `update` / `update_bulk` / `delete` / `delete_in` consultam o endpoint de tarefas até ao estado final (limite de 30 s) e devolvem erro se a tarefa falhar; a escrita em lote fica mais lenta, mas deixa de perder dados em silêncio |
+| database | `reindex` **move** em vez de copiar | o índice de origem fica vazio (`id` é a chave primária global, o mesmo id não pode estar em dois índices); se precisar de manter a origem, não use o driver database |
+| XunSearch | `index: None` passa a significar o índice chamado `default` | como nos outros sete drivers; antes caía na base de dados predefinida do servidor xunsearchd (`db`) — os dados escritos com `index: None` só se encontram passando `index("db")` |
 | Tamanho de página predefinido | Sem `take`, collection / database devolvem **todos** os hits | os outros seis drivers devolvem **10** por predefinição (limite habitual do seu backend) |
 
 Dois alinhamentos semânticos deliberados:
@@ -230,7 +235,7 @@ engine.update_bulk(&docs).await?;                              // escrita em lot
 engine.flush("books").await?;                                  // atualizar visibilidade
 engine.search(&builder).await?;                                // consultar
 engine.delete_in("books", &["book-1".to_string()]).await?;     // eliminar docs de um índice
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // eliminação lógica (marca o doc)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // eliminação lógica (marca o doc; XunSearch: Unsupported)
 engine.reindex("books", "books_v2").await?;                    // reconstruir um índice
 engine.delete_index("books").await?;                           // apagar o índice
 ```
@@ -239,9 +244,10 @@ engine.delete_index("books").await?;                           // apagar o índi
 > driver em memória elimina em todos os índices; o ES só toca no `default`). Para apontar a um
 > índice exato use `delete_in`.
 >
-> O mesmo se aplica à eliminação lógica: **`soft_delete_in(index, ids)` é a variante
-> fiável, seja qual for o engine**. O `soft_delete` sem índice só consegue marcar em todos
-> os índices nos drivers síncronos (`collection` / `database`); os drivers HTTP não
+> O mesmo se aplica à eliminação lógica: `soft_delete_in(index, ids)` é a via fiável em sete
+> dos oito motores — **o XunSearch não implementa nem `soft_delete` nem `soft_delete_in`**,
+> ambos devolvem `ScoutError::Unsupported`. O `soft_delete` sem índice só consegue marcar em
+> todos os índices nos drivers síncronos (`collection` / `database`); os drivers HTTP não
 > conseguem e devolvem `ScoutError::Unsupported` (em vez de não fazer nada em silêncio).
 >
 > O contrato de `flush` é atualizar a visibilidade das escritas: **nenhum driver esvazia
@@ -326,7 +332,9 @@ Todas as operações devolvem `crate::Result<T>`, com os erros a convergir no `S
 
 | Variante | Despoletado por | feature |
 |------|----------|---------|
-| `InvalidIndexName` | nome do índice com espaço / `/` / `\`, começado por `.`, ou vazio (validado antes de escrever) | integrada |
+| `InvalidIndexName` | nome do índice com espaço / `/` / `\` / `"` / `'` / `;` / `` ` ``, vazio, começado por `.` / `-` / `_`, ou com um carácter wildcard / multi-índice (`*` `?` `,` `+`) — validado antes de escrever | integrada |
+| `InvalidHost` | o host traz credenciais embutidas (`http://user:pass@host`); o host não é repetido na mensagem | integrada |
+| `InvalidFieldName` | um campo de filtro ou de ordenação contém espaços ou caracteres de operador; só são aceites letras, dígitos, `_`, `-` e `.` | integrada |
 | `InvalidResult` | campo do documento que não é um objeto JSON | integrada |
 | `Unsupported` | feature do driver desligada, configuração obrigatória em falta, ou engine que não suporta a operação | integrada |
 | `Json` | erro de serialização / desserialização serde | integrada |
@@ -337,23 +345,18 @@ Todas as operações devolvem `crate::Result<T>`, com os erros a convergir no `S
 
 Cada variante traz uma sugestão de diagnóstico — ver [`ScoutError::pet_hint()`](#mascote-do-projeto).
 
-### Ligar Modelos de Negócio (Searchable)
-
-Implemente `Searchable` para mapear uma estrutura de negócio num documento indexável, e
-`SearchableStore` para encapsular as três operações `index_documents` / `remove_documents` / `search`:
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **Limite de segurança.** Hosts com credenciais embutidas (`http://user:pass@host`) são
+> recusados (`InvalidHost`) — o `Display` do erro do reqwest acrescenta o URL completo, bastando
+> uma falha para a palavra-passe ir parar ao log. Os redireccionamentos só são seguidos
+> **mesma origem** (scheme, host e porta iguais), porque o reqwest só remove os cabeçalhos de
+> autenticação padrão quando o host muda e `X-TYPESENSE-API-KEY` / `X-Algolia-API-Key` seguiriam
+> para um host alheio. Consequência habitual: um POST redireccionado pode chegar como GET e sem
+> corpo (RFC 7231), pelo que um reverse proxy que redireccione caminhos de escrita não é
+> transparente. Os nomes de campo de filtros e ordenações passam por `validate_field_name` (só
+> letras, dígitos, `_`, `-` e `.`; `author.name` e nomes não ASCII continuam válidos). E o
+> `Debug` do `ScoutConfig` tapa os segredos (`*.api_key` / `*secret*` / `*password*` / `*token`
+> passam a `"<redacted>"`), enquanto o `Serialize` continua a escrevê-los tal como estão — para
+> registar use `{:?}`, nunca `serde_json::to_string`.
 
 ## Mascote do Projeto
 
@@ -427,8 +430,8 @@ Se este projeto lhe for útil, considere apoiá-lo com uma doação ☕ — o se
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="Doação por WeChat" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="Doação por Alipay" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="Doação por WeChat" width="130"/>
+<img src="../../../docs/alipay.png" alt="Doação por Alipay" width="130"/>
 
 Ler o QR com o WeChat · Ler o QR com o Alipay
 
@@ -436,16 +439,16 @@ Ler o QR com o WeChat · Ler o QR com o Alipay
 
 | Rede | Endereço da carteira | Código QR |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### Transferências Internacionais (Bancárias)
 

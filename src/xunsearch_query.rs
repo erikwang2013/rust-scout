@@ -101,7 +101,19 @@ pub fn value_bytes(value: &serde_json::Value) -> Vec<u8> {
 
 /// 单个文档的索引命令块（不含 SUBMIT）：`update=true` 走 UPDATE（arg1=1、
 /// buf=小写主键）；缺省方案新字段动态分配 vno，ini 方案未声明字段跳过。
-pub fn doc_commands(scheme: &mut FieldScheme, doc: &SearchDocument, update: bool) -> Vec<u8> {
+///
+/// 主键的小写化只作用在**查找 term**（REQUEST 的 buf，删除侧同理）：xapian 的
+/// term 一律小写。值本身走值槽（下面 `doc.id.as_bytes()` 原样存入 SAVEVALUE），
+/// 结果里的 `FIELD vno=0` 读的就是这片字节 —— 客户端只有这一个地方能放原始
+/// 大小写，在这里再小写就真的找不回来了。
+///
+/// vno 用尽时返回错误：动态字段分配不到 vno 只能整条 update 失败，
+/// 继续写会静默丢掉该字段。
+pub fn doc_commands(
+    scheme: &mut FieldScheme,
+    doc: &SearchDocument,
+    update: bool,
+) -> crate::Result<Vec<u8>> {
     let id_vno = scheme.id_vno();
     let id_name = scheme.id_name().to_string();
     let mut out = Vec::new();
@@ -128,12 +140,12 @@ pub fn doc_commands(scheme: &mut FieldScheme, doc: &SearchDocument, update: bool
         if bytes.is_empty() {
             continue; // 空值跳过（xapian 拒绝空词）
         }
-        scheme.add_dynamic(name);
+        scheme.add_dynamic(name)?;
         if let Some(field) = scheme.field(name) {
             out.extend_from_slice(&index_field(field, &bytes));
         }
     }
-    out
+    Ok(out)
 }
 
 /// 字段索引命令：内置分词器按 index 标志发 DOC_INDEX（mixed vno=255 / self
@@ -257,7 +269,11 @@ impl FieldScheme {
     }
 
     /// 解析 xunsearch 项目 ini（xs-ctl 生成，如 `[id] type=id`、
-    /// `[title] type=title index=both weight=5`）。无 id 字段返回 None。
+    /// `[title] type=title index=both weight=5`）。
+    ///
+    /// 无 id 字段、或字段多到 vno 用尽（>254 个非 id/body 字段）都返回 None ——
+    /// 宁可信不过这份 ini，也不能让两个字段共用一个 vno：调用方（引擎）退回缺省
+    /// 动态方案并置 `has_ini=false`，`create_index` 会因此明确报错。
     pub fn from_ini(ini: &str) -> Option<Self> {
         let mut scheme = Self { fields: Vec::new(), by_name: HashMap::new(), dynamic: false };
         let mut section: Option<Section> = None;
@@ -268,7 +284,7 @@ impl FieldScheme {
             }
             if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
                 if let Some(sec) = section.take() {
-                    scheme.add_section(sec);
+                    scheme.add_section(sec).ok()?;
                 }
                 section = Some(Section { name: name.trim().to_string(), ..Section::default() });
             } else if let Some((key, value)) = line.split_once('=') {
@@ -284,7 +300,7 @@ impl FieldScheme {
             }
         }
         if let Some(sec) = section {
-            scheme.add_section(sec);
+            scheme.add_section(sec).ok()?;
         }
         if !scheme.fields.iter().any(|f| f.kind == FieldKind::Id) {
             return None;
@@ -298,11 +314,18 @@ impl FieldScheme {
     }
 
     /// 缺省方案下动态登记新字段；ini 方案或字段已存在时为 no-op。
-    pub fn add_dynamic(&mut self, name: &str) {
+    ///
+    /// vno 只有 1..=254 可用（0 归 id、255 归 mixed 槽）。用尽时报错 ——
+    /// 原先的 `unwrap_or(1)` 会把新字段悄悄塞进**已被占用**的 vno 1，
+    /// 而 `name_for_vno` 取首个同 vno 的字段，于是读回时值挂在别的字段名下
+    /// （≫255 个键的文档即可触发，写进服务端的还是错槽）。
+    pub fn add_dynamic(&mut self, name: &str) -> crate::Result<()> {
         if !self.dynamic || self.has_field(name) || name == self.id_name() {
-            return;
+            return Ok(());
         }
-        let vno = (1..=254).find(|v| !self.fields.iter().any(|f| f.vno == *v)).unwrap_or(1);
+        let vno = (1..=254)
+            .find(|v| !self.fields.iter().any(|f| f.vno == *v))
+            .ok_or_else(|| vno_exhausted(name))?;
         self.push(FieldDef {
             name: name.to_string(),
             vno,
@@ -313,6 +336,7 @@ impl FieldScheme {
             weight: 1,
             tokenizer: None,
         });
+        Ok(())
     }
 
     pub fn has_field(&self, name: &str) -> bool {
@@ -340,7 +364,7 @@ impl FieldScheme {
         self.fields.iter().find(|f| f.vno == vno).map(|f| f.name.as_str())
     }
 
-    fn add_section(&mut self, sec: Section) {
+    fn add_section(&mut self, sec: Section) -> crate::Result<()> {
         let index = if sec.index.is_empty() {
             match sec.kind {
                 FieldKind::Id => "self",
@@ -367,11 +391,13 @@ impl FieldScheme {
         } else if sec.kind == FieldKind::Body {
             MIXED_VNO
         } else {
-            (1..=254).find(|v| !self.fields.iter().any(|f| f.vno == *v)).unwrap_or(1)
+            (1..=254)
+                .find(|v| !self.fields.iter().any(|f| f.vno == *v))
+                .ok_or_else(|| vno_exhausted(&sec.name))?
         };
         // id 重复声明时首个为准
         if sec.kind == FieldKind::Id && self.fields.iter().any(|f| f.kind == FieldKind::Id) {
-            return;
+            return Ok(());
         }
         self.push(FieldDef {
             name: sec.name,
@@ -383,108 +409,18 @@ impl FieldScheme {
             weight,
             tokenizer: sec.tokenizer,
         });
+        Ok(())
     }
+}
+
+/// vno 空间（1..=254）用尽。绝不回退到某个已占用的 vno：那会让两个字段共用一个
+/// 槽，读回时 `name_for_vno` 只认第一个，值就挂到别的字段名下。
+fn vno_exhausted(field: &str) -> crate::ScoutError {
+    crate::ScoutError::XunSearch(format!(
+        "xunsearch: field vno exhausted (1..=254 all in use), cannot register `{field}`"
+    ))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pack_cmd_matches_php_format() {
-        // 对照 PHP SDK pack('CCCCIN', ...)：cmd/arg1/arg2/blen1 各 1 字节，blen u32le
-        assert_eq!(
-            pack_cmd(CMD_QUERY_INIT, 0, 0, &[], &[]),
-            vec![CMD_QUERY_INIT, 0, 0, 0, 0, 0, 0, 0]
-        );
-        assert_eq!(
-            pack_cmd(1, 2, 3, b"hi", b"x"),
-            vec![1, 2, 3, 1, 2, 0, 0, 0, b'h', b'i', b'x']
-        );
-        assert_eq!(
-            pack_cmd(CMD_QUERY_RANGE, 0, 7, &[1, 2, 3], &[1, 2, 3]),
-            vec![228, 0, 7, 3, 3, 0, 0, 0, 1, 2, 3, 1, 2, 3]
-        );
-    }
-
-    #[test]
-    fn parse_packet_round_trips_and_rejects_short_data() {
-        let data = pack_cmd(CMD_USE, 0, 0, b"books", &[]);
-        let (cmd, arg, buf, buf1) = parse_packet(&data).unwrap();
-        assert_eq!(cmd, CMD_USE);
-        assert_eq!(arg, 0);
-        assert_eq!(buf, b"books");
-        assert!(buf1.is_empty());
-        assert_eq!(parse_packet(&data[..7]), None); // 头不足 8 字节
-        let bad = pack_cmd(CMD_OK, 0, 0, b"abc", &[]);
-        assert_eq!(parse_packet(&bad[..9]), None); // 长度字段超出实际数据
-    }
-
-    #[test]
-    fn ini_scheme_parses_vnos_and_flags() {
-        let ini = r#"
-project.name = demo
-
-[id]
-type = id
-
-[title]
-type = title
-index = both
-weight = 5
-
-[content]
-type = body
-
-[status]
-type = numeric
-index = none
-
-[tags]
-type = string
-tokenizer = none
-"#;
-        let scheme = FieldScheme::from_ini(ini).unwrap();
-        assert_eq!(scheme.id_vno(), 0);
-        assert_eq!(scheme.id_name(), "id");
-        let title = scheme.field("title").unwrap();
-        assert_eq!(title.vno, 1);
-        assert!(title.index_self && title.index_mixed && title.with_pos);
-        assert_eq!(title.weight, 5);
-        let body = scheme.field("content").unwrap();
-        assert_eq!(body.vno, MIXED_VNO);
-        let status = scheme.field("status").unwrap();
-        assert_eq!(status.vno, 2);
-        assert!(!status.index_self && !status.index_mixed);
-        assert_eq!(scheme.numeric_vnos(), vec![2]);
-        let tags = scheme.field("tags").unwrap();
-        assert!(tags.custom_tokenizer()); // tokenizer=none 非 full → 只存值
-        assert!(!tags.index_self);
-        assert_eq!(scheme.name_for_vno(1), Some("title"));
-        assert_eq!(scheme.name_for_vno(255), Some("content"));
-        assert_eq!(scheme.name_for_vno(9), None);
-    }
-
-    #[test]
-    fn ini_without_id_field_is_rejected() {
-        assert!(FieldScheme::from_ini("[title]\ntype = title\n").is_none());
-        assert!(FieldScheme::from_ini("").is_none());
-    }
-
-    #[test]
-    fn doc_commands_emit_expected_bytes() {
-        let mut scheme = FieldScheme::default();
-        let doc = SearchDocument::new("one", serde_json::json!({"title": "rust"})).unwrap();
-        let cmds = doc_commands(&mut scheme, &doc, true);
-        assert_eq!(
-            cmds,
-            vec![
-                163, 1, 0, 0, 3, 0, 0, 0, b'o', b'n', b'e', // INDEX_REQUEST(UPDATE, vno=0, "one")
-                162, 0x81, 0, 0, 3, 0, 0, 0, b'o', b'n', b'e', // DOC_INDEX(id: weight1|SAVEVALUE)
-                162, 1, 255, 0, 4, 0, 0, 0, b'r', b'u', b's', b't', // DOC_INDEX(mixed, vno=255)
-                162, 0x81, 1, 0, 4, 0, 0, 0, b'r', b'u', b's', b't', // DOC_INDEX(self+SAVEVALUE, vno=1)
-            ]
-        );
-        assert_eq!(scheme.field("title").map(|f| f.vno), Some(1)); // 动态方案已记录新字段
-    }
-}
+#[path = "xunsearch_query_tests.rs"]
+mod tests;

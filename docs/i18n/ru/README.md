@@ -44,7 +44,7 @@ let result = engine.search(
 | 🗑️ Мягкое удаление | `soft_delete_in(index, ids)` ставит метку `__soft_deleted`; три режима фильтрации `with_trashed()` / `only_trashed()` |
 | 📦 Пакетные операции | `update_bulk` / `delete_bulk` сокращают число обращений; `delete_in` удаляет точно в указанном индексе |
 | 🔌 Сменные драйверы | По умолчанию память без зависимостей; 8 бэкендов за своими feature — неиспользуемое не компилируется |
-| 🔒 Границы безопасности | Проверка имени индекса (`validate_index_name`) + процентное кодирование RFC 3986 против инъекций в путь |
+| 🔒 Границы безопасности | Проверка имени индекса, имени поля и хоста (`validate_index_name` / `validate_field_name` / `validate_host`) + процентное кодирование RFC 3986 против инъекций в путь |
 | 🤖 Питомец проекта | Робот-поисковик Scout: баннер в терминале + подсказки по каждой ошибке (`rust_scout::pet`) |
 
 ## Архитектура
@@ -89,7 +89,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: цепочки запросов
 │   ├── document.rs         # SearchDocument: записываемый документ (контракт serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: результаты запроса
-│   ├── searchable.rs       # Searchable / SearchableStore: мост к бизнес-моделям
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # питомец проекта: робот-поисковик Scout (баннер + подсказки к ошибкам)
 │   │
@@ -118,7 +117,9 @@ rust-scout/
 ```
 
 > Метка `[feature]` указывает Cargo feature, необходимую драйверу. Если она выключена,
-> `EngineManager` вернёт `ScoutError::Unsupported`, а не деградирует молча.
+> `EngineManager` вернёт `ScoutError::Unsupported`, а не деградирует молча. Неизвестная строка
+> `driver` (опечатка, лишний пробел в конце, неверный регистр вроде `OpenSearch`) — тоже
+> ошибка; раньше она молча приводила к драйверу в памяти.
 
 ### Различия в возможностях драйверов
 
@@ -130,8 +131,12 @@ rust-scout/
 | Algolia | Сортировка требует заранее построенных индексов-реплик; выбрать её для отдельного запроса нельзя | `order_by` **игнорируется** (результаты всё равно возвращаются, порядок просто не определён) |
 | XunSearch | Нет команды протокола для `where_in` / `where_not_in` | возвращает `Unsupported`; используйте `where_field` |
 | XunSearch | Сервер поддерживает только одно поле сортировки | несколько `order_by` возвращают `Unsupported` |
-| XunSearch | Мягкое удаление не реализовано | `soft_delete` / `only_trashed` возвращают `Unsupported` |
+| XunSearch | Мягкое удаление не реализовано | `soft_delete` / `soft_delete_in` / `only_trashed` возвращают `Unsupported` |
 | XunSearch | Для создания индекса нужен ini со схемой полей | `create_index` возвращает `Unsupported` (передайте ini в `XunSearchEngine::new`) |
+| Typesense | Непустой `q` требует `query_by` | без `.option("query_by", "field1,field2")` бэкенд отвечает 400 `Parameter \`query_by\` is required`; драйвер не подставляет поле сам (неверная догадка молча изменила бы ранжирование) |
+| Meilisearch / Algolia | Запись выполняется как задача (task) бэкенда | `update` / `update_bulk` / `delete` / `delete_in` опрашивают эндпоинт задач до конечного состояния (предел 30 с) и возвращают ошибку, если задача не удалась; пакетная запись стала медленнее, зато данные больше не теряются молча |
+| database | `reindex` **переносит**, а не копирует | индекс-источник очищается (`id` — глобальный первичный ключ, один id не может быть в двух индексах); если источник нужно сохранить, не используйте драйвер database |
+| XunSearch | `index: None` теперь означает индекс с именем `default` | как у остальных семи драйверов; раньше он попадал в серверную базу по умолчанию `db` у xunsearchd — данные, записанные с `index: None`, теперь доступны только через `index("db")` |
 | Размер по умолчанию | Без `take` collection / database возвращают **все** совпадения | Остальные шесть драйверов по умолчанию возвращают **10** (привычный предел их бэкендов) |
 
 Есть два намеренных семантических соответствия:
@@ -237,7 +242,7 @@ engine.update_bulk(&docs).await?;                              // пакетна
 engine.flush("books").await?;                                  // обновить видимость
 engine.search(&builder).await?;                                // запрос
 engine.delete_in("books", &["book-1".to_string()]).await?;     // удалить документы из одного индекса
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // мягкое удаление (ставит метку)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // мягкое удаление (ставит метку; XunSearch: Unsupported)
 engine.reindex("books", "books_v2").await?;                    // перестроить индекс
 engine.delete_index("books").await?;                           // удалить индекс
 ```
@@ -246,10 +251,11 @@ engine.delete_index("books").await?;                           // удалить
 > (драйвер памяти удаляет по всем индексам, ES затрагивает только `default`).
 > Чтобы указать индекс точно, используйте `delete_in`.
 >
-> Мягкое удаление — так же: **`soft_delete_in(index, ids)` надёжен независимо от движка**.
-> `soft_delete` без индекса может помечать документы по всем индексам только на
-> синхронном бэкенде (`collection` / `database`); HTTP-бэкенды так не умеют и возвращают
-> `ScoutError::Unsupported` (а не молча ничего не делают).
+> Мягкое удаление — так же: `soft_delete_in(index, ids)` — надёжный путь у семи движков из
+> восьми; **XunSearch не реализует ни `soft_delete`, ни `soft_delete_in`**, оба возвращают
+> `ScoutError::Unsupported`. `soft_delete` без индекса может помечать документы по всем
+> индексам только на синхронном бэкенде (`collection` / `database`); HTTP-бэкенды так не умеют
+> и возвращают `ScoutError::Unsupported` (а не молча ничего не делают).
 >
 > Контракт `flush` — «обновить видимость записей», **ни один драйвер не очищает индекс**:
 > ES выполняет `_refresh`, XunSearch отправляет `CMD_INDEX_COMMIT`, остальные драйверы делают
@@ -332,7 +338,9 @@ let engine = EngineManager::new(config).engine()?;
 
 | Вариант | Когда возникает | feature |
 |---------|--------------|---------|
-| `InvalidIndexName` | имя индекса содержит пробел / `/` / `\`, начинается с `.` или пусто (проверяется перед записью) | встроено |
+| `InvalidIndexName` | имя индекса содержит пробел / `/` / `\` / `"` / `'` / `;` / `` ` ``, пусто, начинается с `.` / `-` / `_` или содержит символ-шаблон / мультииндексный символ (`*` `?` `,` `+`) — проверяется перед записью | встроено |
+| `InvalidHost` | в хосте есть учётные данные (`http://user:pass@host`); хост не повторяется в сообщении об ошибке | встроено |
+| `InvalidFieldName` | имя поля фильтра или сортировки содержит пробел или символ оператора; допустимы только буквы, цифры, `_`, `-` и `.` | встроено |
 | `InvalidResult` | поле документа не является JSON-объектом | встроено |
 | `Unsupported` | нужная драйверу feature выключена, не хватает обязательной конфигурации или движок не поддерживает операцию | встроено |
 | `Json` | ошибка сериализации / десериализации serde | встроено |
@@ -343,24 +351,18 @@ let engine = EngineManager::new(config).engine()?;
 
 Каждый вариант несёт подсказку по устранению — см. [`ScoutError::pet_hint()`](#питомец-проекта).
 
-### Мост к бизнес-моделям (Searchable)
-
-Реализуйте `Searchable`, чтобы отобразить бизнес-структуру в индексируемый документ,
-и `SearchableStore`, чтобы инкапсулировать три операции `index_documents` /
-`remove_documents` / `search`:
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **Граница безопасности.** Хосты с встроенными учётными данными (`http://user:pass@host`)
+> отклоняются (`InvalidHost`) — `Display` ошибки reqwest дописывает URL целиком, поэтому одна
+> неудачная попытка унесла бы пароль в лог. Перенаправления отслеживаются только **в пределах
+> того же источника** (совпадают scheme, host и port), так как при смене хоста reqwest снимает
+> лишь стандартные заголовки аутентификации, а `X-TYPESENSE-API-KEY` / `X-Algolia-API-Key` —
+> кастомные и ушли бы на чужой хост. Обычное следствие: перенаправленный POST может прийти как
+> GET и без тела (RFC 7231), так что обратный прокси, перенаправляющий пути записи, не
+> прозрачен. Имена полей фильтров и сортировки проходят через `validate_field_name` (только
+> буквы, цифры, `_`, `-`, `.`; `author.name` и не-ASCII имена по-прежнему допустимы). И `Debug`
+> у `ScoutConfig` скрывает секреты (`*.api_key` / `*secret*` / `*password*` / `*token`
+> превращаются в `"<redacted>"`), тогда как `Serialize` пишет их как есть — для логов
+> используйте `{:?}`, а не `serde_json::to_string`.
 
 ## Питомец проекта
 
@@ -433,8 +435,8 @@ eprintln!("{}", pet::format_error(&err));
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="Донат через WeChat" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="Донат через Alipay" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="Донат через WeChat" width="130"/>
+<img src="../../../docs/alipay.png" alt="Донат через Alipay" width="130"/>
 
 Сканируйте в WeChat · Сканируйте в Alipay
 
@@ -442,16 +444,16 @@ eprintln!("{}", pet::format_error(&err));
 
 | Сеть | Адрес кошелька | QR-код |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### Переводы по всему миру (банковский перевод)
 

@@ -181,21 +181,41 @@ impl SearchBuilder {
     }
 
     pub fn sort_hits(&self, hits: &mut [crate::SearchHit]) {
-        if self.orders.is_empty() {
-            hits.sort_by(|a, b| a.id.cmp(&b.id));
-            return;
-        }
         hits.sort_by(|a, b| {
-            for order in &self.orders {
-                let left = a.source.get(&order.field).cloned();
-                let right = b.source.get(&order.field).cloned();
-                let cmp = order_cmp(&left, &right);
-                if cmp != std::cmp::Ordering::Equal {
-                    return if order.desc { cmp.reverse() } else { cmp };
-                }
-            }
-            a.id.cmp(&b.id)
+            self.sort_cmp(
+                (a.source.as_object(), a.id.as_str()),
+                (b.source.as_object(), b.id.as_str()),
+            )
         });
+    }
+
+    /// [`sort_hits`](Self::sort_hits) 的比较规则，作用在「(字段对象, id)」上。
+    ///
+    /// 抽出来是为了让进程内驱动能**先排序再物化**：命中集可能上万条，而为了一页
+    /// 先给每条命中深拷贝一次 `fields` 是纯浪费。`SearchDocument::fields` 与
+    /// `SearchHit::source` 是同一个 JSON 对象（见 `From<&SearchDocument>`），
+    /// 所以拿文档引用跑同一套比较，结果与排完再取窗口完全一致。
+    ///
+    /// 第一个元素用 `Option<&Map>` 而不是 `&Value`：命中的 `source` 可能是
+    /// 非对象（如后端没回 `_source` 时的 `Value::Null`），而 `Value::get` 在
+    /// 非对象上一律返回 `None` —— `as_object()` 给了 `None` 后逐字段查找同样是
+    /// `None`，并列时仍回落到 id 比较，与原行为逐条一致。
+    ///
+    /// `orders` 为空时退化成按 id 升序 —— 与 [`sort_hits`](Self::sort_hits) 原行为一致。
+    pub(crate) fn sort_cmp(
+        &self,
+        a: (Option<&serde_json::Map<String, serde_json::Value>>, &str),
+        b: (Option<&serde_json::Map<String, serde_json::Value>>, &str),
+    ) -> std::cmp::Ordering {
+        for order in &self.orders {
+            let left = a.0.and_then(|fields| fields.get(&order.field)).cloned();
+            let right = b.0.and_then(|fields| fields.get(&order.field)).cloned();
+            let cmp = order_cmp(&left, &right);
+            if cmp != std::cmp::Ordering::Equal {
+                return if order.desc { cmp.reverse() } else { cmp };
+            }
+        }
+        a.1.cmp(b.1)
     }
 }
 

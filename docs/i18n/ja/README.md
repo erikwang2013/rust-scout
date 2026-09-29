@@ -42,7 +42,7 @@ let result = engine.search(
 | 🗑️ ソフト削除 | `soft_delete_in(index, ids)` が `__soft_deleted` を立て、`with_trashed()` / `only_trashed()` で三態フィルタ |
 | 📦 バッチ操作 | `update_bulk` / `delete_bulk` で往復を削減。`delete_in` は指定索引に限定して削除 |
 | 🔌 プラガブルドライバ | 既定は依存ゼロ。8 種のバックエンドはそれぞれ feature ゲートされ、不要なものはコンパイルされない |
-| 🔒 安全境界 | 索引名の検証（`validate_index_name`）+ RFC 3986 パーセント符号化でパス注入を防ぐ |
+| 🔒 安全境界 | 索引名・フィールド名・ホストの検証（`validate_index_name` / `validate_field_name` / `validate_host`）+ RFC 3986 パーセント符号化でパス注入を防ぐ |
 | 🤖 プロジェクトのペット | 検索ロボット Scout：ターミナルバナー + エラーごとの調査ヒント（`rust_scout::pet`） |
 
 ## アーキテクチャ設計
@@ -85,7 +85,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter：チェーンクエリ
 │   ├── document.rs         # SearchDocument：書き込み文書（serde JSON 契約）
 │   ├── result.rs           # SearchResult / SearchHit：検索結果
-│   ├── searchable.rs       # Searchable / SearchableStore：業務モデルのブリッジ
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # プロジェクトのペット：検索ロボット Scout（バナー + エラーヒント）
 │   │
@@ -114,7 +113,9 @@ rust-scout/
 ```
 
 > `[feature]` はそのドライバに必要な Cargo feature を示す。有効化されていない場合、
-> `EngineManager` は黙って機能を落とすのではなく `ScoutError::Unsupported` を返す。
+> `EngineManager` は黙って機能を落とすのではなく `ScoutError::Unsupported` を返す。未知の
+> `driver` 文字列（打ち間違い、末尾の空白、`OpenSearch` のような大文字小文字の誤り）もエラーに
+> なる —— 以前は黙ってメモリドライバに落ちていた。
 
 ### ドライバ能力の差異
 
@@ -126,8 +127,12 @@ rust-scout/
 | Algolia | ソートには事前に構築したレプリカ索引が必要で、クエリごとに選ぶことはできない | `order_by` は **無視される**（結果自体は返り、順序が不定になるだけ） |
 | XunSearch | `where_in` / `where_not_in` に対応するプロトコルコマンドがない | `Unsupported` を返す；`where_field` を使う |
 | XunSearch | サーバーが扱えるソートフィールドは 1 つだけ | `order_by` を複数指定すると `Unsupported` を返す |
-| XunSearch | ソフト削除は未実装 | `soft_delete` / `only_trashed` は `Unsupported` を返す |
+| XunSearch | ソフト削除は未実装 | `soft_delete` / `soft_delete_in` / `only_trashed` は `Unsupported` を返す |
 | XunSearch | 索引の作成にはフィールド定義の ini が必要 | `create_index` は `Unsupported` を返す（`XunSearchEngine::new` に ini を渡す） |
+| Typesense | 空でない `q` には `query_by` が必須 | `.option("query_by", "field1,field2")` を渡さないとバックエンドは 400 `Parameter \`query_by\` is required` を返す；ドライバはフィールドを推測しない（推測を誤ると順位が黙って変わる） |
+| Meilisearch / Algolia | 書き込みはバックエンドのタスクとして実行される | `update` / `update_bulk` / `delete` / `delete_in` はタスクのエンドポイントを終端状態までポーリングし（上限 30 秒）、失敗したタスクはエラーにする；バッチ書き込みは遅くなるが、データが黙って消えなくなる |
+| database | `reindex` はコピーではなく**移動** | 元の索引は空になる（`id` がグローバル主キーで、同じ id は二つの索引に存在できない）；元を残したいなら database ドライバを使わないこと |
+| XunSearch | `index: None` は `default` という名前の索引を指すようになった | 他の七つのドライバと同じ；以前は xunsearchd 側の既定データベース `db` に落ちていた —— `index: None` で書いたデータは `index("db")` を渡さないと引けない |
 | 既定件数 | `take` を渡さない場合、collection / database は**すべて**の命中を返す | 残り六つのドライバは既定で **10** 件だけ返す（各バックエンドの慣例的な上限） |
 
 意図的に意味論をそろえている点が 2 つある：
@@ -232,7 +237,7 @@ engine.update_bulk(&docs).await?;                              // バッチ書�
 engine.flush("books").await?;                                  // 可視性を更新
 engine.search(&builder).await?;                                // 検索
 engine.delete_in("books", &["book-1".to_string()]).await?;     // 索引を限定して文書削除
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // ソフト削除（フラグを立てる）
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // ソフト削除（フラグを立てる；XunSearch は Unsupported）
 engine.reindex("books", "books_v2").await?;                    // 索引を再構築
 engine.delete_index("books").await?;                           // 索引を削除
 ```
@@ -240,10 +245,11 @@ engine.delete_index("books").await?;                           // 索引を削�
 > `delete` は索引情報を持たないため、意味はエンジンごとに異なる（メモリドライバは索引をまたいで
 > 削除し、ES は `default` 索引だけを見る）。特定の索引に限定したい場合は `delete_in` を使う。
 >
-> ソフト削除も同様：**`soft_delete_in(index, ids)` がエンジンを問わず信頼できる方**。
-> 索引を指定しない `soft_delete` は同期バックエンド（`collection` / `database`）だけが
-> 索引をまたいで印を付けられる；HTTP バックエンドにはできず、`ScoutError::Unsupported`
-> を返す（黙って何もしないのではなく）。
+> ソフト削除も同様：`soft_delete_in(index, ids)` が八つのうち七つのエンジンで信頼できる経路。
+> **XunSearch は `soft_delete` も `soft_delete_in` も実装しておらず**、どちらも
+> `ScoutError::Unsupported` を返す。索引を指定しない `soft_delete` は同期バックエンド
+> （`collection` / `database`）だけが索引をまたいで印を付けられる；HTTP バックエンドにはできず、
+> `ScoutError::Unsupported` を返す（黙って何もしないのではなく）。
 >
 > `flush` の契約は「書き込みの可視性を更新する」ことで、**どのドライバも索引を空にしない**：
 > ES は `_refresh`、XunSearch は `CMD_INDEX_COMMIT` を送り、他のドライバは書き込みが即時可視
@@ -325,7 +331,9 @@ let engine = EngineManager::new(config).engine()?;
 
 | バリアント | 発生条件 | feature |
 |------|----------|---------|
-| `InvalidIndexName` | 索引名に空白 / `/` / `\` を含む、`.` で始まる、または空（書き込み前に検証） | 組み込み |
+| `InvalidIndexName` | 索引名に空白 / `/` / `\` / `"` / `'` / `;` / `` ` `` を含む、空である、`.` / `-` / `_` で始まる、またはワイルドカード / 複数索引の文字（`*` `?` `,` `+`）を含む（書き込み前に検証） | 組み込み |
+| `InvalidHost` | ホストに認証情報が埋め込まれている（`http://user:pass@host`）；エラーにホストをそのまま出さない | 組み込み |
+| `InvalidFieldName` | フィルタ / ソートのフィールド名に空白か演算子文字が含まれる；使えるのは英数字、`_`、`-`、`.` のみ | 組み込み |
 | `InvalidResult` | 文書のフィールドが JSON オブジェクトでない | 組み込み |
 | `Unsupported` | ドライバに必要な feature が無効、必須設定の欠落、エンジンが未対応の操作 | 組み込み |
 | `Json` | serde のシリアライズ / デシリアライズエラー | 組み込み |
@@ -336,23 +344,17 @@ let engine = EngineManager::new(config).engine()?;
 
 すべてのバリアントが調査ヒントを伴う。詳しくは [`ScoutError::pet_hint()`](#プロジェクトのペット)。
 
-### 業務モデルのブリッジ（Searchable）
-
-`Searchable` を実装して業務構造をインデックス可能な文書に写像し、`SearchableStore` を実装して
-`index_documents` / `remove_documents` / `search` の 3 操作を包む：
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **セキュリティ境界。** 認証情報を埋め込んだホスト（`http://user:pass@host`）は拒否される
+> （`InvalidHost`）—— reqwest のエラー `Display` は URL 全体を連結するため、一度失敗すれば
+> パスワードがログに載る。リダイレクトは**同一オリジン**（scheme・host・port がすべて同じ）
+> のときだけ追従する。reqwest はホストが変わっても標準の認証ヘッダーしか外さず、
+> `X-TYPESENSE-API-KEY` / `X-Algolia-API-Key` はそのまま別ホストへ送られてしまうからだ。
+> よくある帰結として、リダイレクトされた POST は本文なしの GET として届くことがある（RFC 7231）。
+> 書き込みパスをリダイレクトするリバースプロキシは透過的ではない。フィルタ / ソートの
+> フィールド名は `validate_field_name` を通る（英数字、`_`、`-`、`.` のみ許可；`author.name` と
+> 非 ASCII はそのまま使える）。また `ScoutConfig` の `Debug` は秘密を伏せ
+> （`*.api_key` / `*secret*` / `*password*` / `*token` は `"<redacted>"` になる）、`Serialize` は
+> そのまま出力する —— ログには `{:?}` を使い、`serde_json::to_string` は使わないこと。
 
 ## プロジェクトのペット
 
@@ -425,8 +427,8 @@ eprintln!("{}", pet::format_error(&err));
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="WeChat 投げ銭" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="Alipay 投げ銭" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="WeChat 投げ銭" width="130"/>
+<img src="../../../docs/alipay.png" alt="Alipay 投げ銭" width="130"/>
 
 WeChat でスキャン · Alipay でスキャン
 
@@ -434,16 +436,16 @@ WeChat でスキャン · Alipay でスキャン
 
 | メインネット | ウォレットアドレス | QR コード |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### 海外送金（銀行振込）
 

@@ -135,15 +135,30 @@ impl XunSearchEngine {
             return Err(crate::ScoutError::Unsupported("xunsearch: where_in/where_not_in not supported; use where_field (QUERY_RANGE)".to_string()));
         }
         let mut stream = self.connect(true).await?;
-        self.use_project(&mut stream, builder.index.as_deref()).await?;
+        // index=None ≡ "default"（与其余七个驱动一致）：否则
+        // `update([index Some("default")])` 写的是 default 库、
+        // `search(无 index)` 读的却是服务端默认库，两边各自都是空。
+        self.use_project(&mut stream, Some(builder.index.as_deref().unwrap_or("default"))).await?;
         let mut buf = self.build_silent(builder)?;
-        let offset_limit = [builder.skip.unwrap_or(0) as u32, builder.take.unwrap_or(10) as u32].map(u32::to_le_bytes).concat();
+        // 发给服务端的窗口不变（take，缺省 10）；接受上限再套 MAX_HITS
+        let limit = builder.take.unwrap_or(10);
+        let accepted = limit.min(MAX_HITS);
+        let offset_limit = [builder.skip.unwrap_or(0) as u32, limit as u32].map(u32::to_le_bytes).concat();
         buf.extend_from_slice(&pack_cmd(CMD_SEARCH_GET_RESULT, 0, 0, builder.query.as_bytes(), &offset_limit));
         with_timeout(stream.write_all(&buf)).await?;
-        self.read_result(&mut stream).await
+        self.read_result(&mut stream, accepted).await
     }
 
-    async fn read_result(&self, stream: &mut TcpStream) -> crate::Result<SearchResult> {
+    /// 读结果流。`limit` = 接受的上界（请求窗口与 `MAX_HITS` 取小）。
+    ///
+    /// 两道上限，缺一不可：
+    /// - 条数：合法服务端不会回超过自己被告知的 limit 的文档数，`total` 是**服务端
+    ///   自报**的、不能当上界，所以用 limit。超过即报错（不截断）—— 原先没有上限，
+    ///   对端一直发 `CMD_SEARCH_RESULT_DOC` 帧（8 字节的零长度包也算一条）就能把
+    ///   hits 撑到 OOM。
+    /// - 整段流的总预算：5s 超时是 per-read 的，源源不断的包会把它一次次刷新，
+    ///   条数上限挡不住只发 FACETS/MATCHED 帧的对端。
+    async fn read_result(&self, stream: &mut TcpStream, limit: usize) -> crate::Result<SearchResult> {
         let id_vno = self.scheme.lock().expect("xunsearch scheme poisoned").id_vno();
         let (cmd, arg, buf, _) = read_packet(stream).await?;
         if cmd == CMD_ERR {
@@ -156,55 +171,80 @@ impl XunSearchEngine {
             .get(..4)
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
             .unwrap_or(0) as usize;
-        let mut hits: Vec<SearchHit> = Vec::new();
-        loop {
-            let (cmd, arg, buf, _) = read_packet(stream).await?;
-            match cmd {
-                CMD_OK if arg == OK_RESULT_END => break,
-                CMD_SEARCH_RESULT_DOC => {
-                    // 20 字节：docid/rank/ccount u32le + percent i32le + weight f32le
-                    let weight = buf
-                        .get(16..20)
-                        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                        .unwrap_or(0.0);
-                    hits.push(SearchHit {
-                        id: String::new(),
-                        score: Some(f64::from(weight)),
-                        source: serde_json::Value::Object(Default::default()),
-                        highlight: None,
-                    });
-                }
-                CMD_SEARCH_RESULT_FIELD => {
-                    let vno = arg as u8;
-                    let value = String::from_utf8_lossy(&buf).to_string();
-                    let hit = hits.last_mut().ok_or_else(|| {
-                        crate::ScoutError::XunSearch("result field before any doc".to_string())
-                    })?;
-                    if vno == id_vno {
-                        hit.id = value;
-                    } else {
-                        let name = {
-                            let scheme = self.scheme.lock().expect("xunsearch scheme poisoned");
-                            scheme
-                                .name_for_vno(vno)
-                                .map(str::to_string)
-                                .or_else(|| (vno == MIXED_VNO).then(|| "body".to_string()))
-                        };
-                        if let Some(name) = name {
+        let body = async {
+            let mut hits: Vec<SearchHit> = Vec::new();
+            loop {
+                let (cmd, arg, buf, _) = read_packet(stream).await?;
+                match cmd {
+                    CMD_OK if arg == OK_RESULT_END => break,
+                    CMD_SEARCH_RESULT_DOC => {
+                        if hits.len() >= limit {
+                            // 静默截断会被读成「本来就这么多结果」，必须显式失败
+                            return Err(crate::ScoutError::XunSearch(format!(
+                                "SEARCH_GET_RESULT: peer sent more than the accepted {limit} documents"
+                            )));
+                        }
+                        // 20 字节：docid/rank/ccount u32le + percent i32le + weight f32le
+                        let weight = buf
+                            .get(16..20)
+                            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                            .unwrap_or(0.0);
+                        hits.push(SearchHit {
+                            id: String::new(),
+                            score: Some(f64::from(weight)),
+                            source: serde_json::Value::Object(Default::default()),
+                            highlight: None,
+                        });
+                    }
+                    CMD_SEARCH_RESULT_FIELD => {
+                        let vno = arg as u8;
+                        let value = String::from_utf8_lossy(&buf).to_string();
+                        let hit = hits.last_mut().ok_or_else(|| {
+                            crate::ScoutError::XunSearch("result field before any doc".to_string())
+                        })?;
+                        if vno == id_vno {
+                            hit.id = value;
+                        } else {
+                            let name = {
+                                let scheme = self.scheme.lock().expect("xunsearch scheme poisoned");
+                                scheme
+                                    .name_for_vno(vno)
+                                    .map(str::to_string)
+                                    .or_else(|| (vno == MIXED_VNO).then(|| "body".to_string()))
+                            };
+                            // vno↔名字是**客户端约定**（服务端不交换方案）：无映射说明
+                            // 写入端用的是另一份方案，读回的名字会张冠李戴。宁可按
+                            // 未知 vno 报错 —— 丢弃这个值会让调用方以为字段本来就是空的。
+                            let name = name.ok_or_else(|| {
+                                crate::ScoutError::XunSearch(format!(
+                                    "search result: field vno {vno} not in the local field scheme (writer used a different scheme)"
+                                ))
+                            })?;
                             hit.source
                                 .as_object_mut()
                                 .unwrap()
                                 .insert(name, serde_json::Value::String(value));
                         }
                     }
-                }
-                CMD_SEARCH_RESULT_FACETS | CMD_SEARCH_RESULT_MATCHED => {}
-                CMD_ERR => return Err(server_err(arg, &buf)),
-                other => {
-                    return Err(crate::ScoutError::XunSearch(format!("search result: unexpected cmd {other}")))
+                    CMD_SEARCH_RESULT_FACETS | CMD_SEARCH_RESULT_MATCHED => {}
+                    CMD_ERR => return Err(server_err(arg, &buf)),
+                    other => {
+                        return Err(crate::ScoutError::XunSearch(format!("search result: unexpected cmd {other}")))
+                    }
                 }
             }
-        }
+            Ok(hits)
+        };
+        let hits = match tokio::time::timeout(RESULT_DEADLINE, body).await {
+            Ok(Ok(hits)) => hits,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                return Err(crate::ScoutError::XunSearch(format!(
+                    "SEARCH_GET_RESULT: result stream exceeded the {}s deadline",
+                    RESULT_DEADLINE.as_secs()
+                )))
+            }
+        };
         Ok(SearchResult { hits, total, ..SearchResult::default() })
     }
 
@@ -229,12 +269,22 @@ fn field_vno(scheme: &FieldScheme, field: &str, what: &str) -> crate::Result<u8>
     })
 }
 
-/// 5s 超时读写（connect 同）：服务端挂死不拖住调用方。
+/// 单次读写 5s 超时（connect 同）：服务端挂死不拖住调用方。
 const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// 整段搜索结果流的总预算。per-read 的 5s 会被不断到来的包反复刷新，挡不住
+/// 一个慢慢喂包的对端；20s = 4× 单包预算，远大于一页结果的正常耗时。
+const RESULT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+/// 单次搜索最多缓存的命中数（≈ 十几 MB）。`take` 是调用方自己给的，给成天文数字
+/// 时它就不再是防线（20s 内环回也能灌进来几十万条），所以要有个和调用方无关的
+/// 常数兜底。ponytail: 硬上限，需要更大窗口就调这里（只拒绝、绝不截断）。
+const MAX_HITS: usize = 100_000;
+
 async fn with_timeout<T>(fut: impl std::future::Future<Output = std::io::Result<T>>) -> crate::Result<T> {
     tokio::time::timeout(IO_TIMEOUT, fut).await
         .map_err(|_| crate::ScoutError::XunSearch("xunsearch I/O timed out".to_string()))?
-        .map_err(|e| crate::ScoutError::XunSearch(format!("xunsearch I/O failed: {e}")))
+        // I/O 失败保留原始 io::Error（调用方还能看 ErrorKind/source）；
+        // 超时不是 io::Error，留在上面那条分支。
+        .map_err(crate::ScoutError::XunSearchIo)
 }
 
 const MAX_PACKET: usize = 16 * 1024 * 1024; // 脏包防护：超过视为协议错误
@@ -276,29 +326,26 @@ impl Engine for XunSearchEngine {
             }
             let mut stream = self.connect(false).await?;
             self.use_project(&mut stream, None).await?;
-            // 按 doc.index 分组；无 index 组不 SET_DB，走服务端默认库（"db"），
-            // 与 search/delete 的 use_project(None) 读写一致。
-            let mut groups: Vec<(Option<&str>, Vec<&SearchDocument>)> = Vec::new();
+            // 按 doc.index 分组，`None` ≡ "default"（与其余七个驱动一致：search 那边
+            // 读的也是 default 库，两边对得上）。每组都显式 SET_DB —— 组间串库不再
+            // 可能，因此也不需要再把「无 index」那组排到最前。
+            let mut groups: Vec<(&str, Vec<&SearchDocument>)> = Vec::new();
             for doc in docs {
-                let index = doc.index.as_deref();
+                let index = doc.index.as_deref().unwrap_or("default");
                 match groups.iter_mut().find(|(k, _)| *k == index) {
                     Some((_, g)) => g.push(doc),
                     None => groups.push((index, vec![doc])),
                 }
             }
-            // 无 index 组排最前，避免落在前一组的 SET_DB 库中（串库）。
-            groups.sort_by_key(|(index, _)| index.is_some());
             for (index, group) in groups {
-                if let Some(index) = index {
-                    crate::validate_index_name(index)?; // 系统边界：组级库名校验
-                    with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_SET_DB, 0, 0, index.as_bytes(), &[]))).await?;
-                    expect_ok(&mut stream, OK_DB_CHANGED, "CMD_INDEX_SET_DB").await?;
-                }
+                crate::validate_index_name(index)?; // 系统边界：组级库名校验
+                with_timeout(stream.write_all(&pack_cmd(CMD_INDEX_SET_DB, 0, 0, index.as_bytes(), &[]))).await?;
+                expect_ok(&mut stream, OK_DB_CHANGED, "CMD_INDEX_SET_DB").await?;
                 let mut buf = Vec::new();
                 {
                     let mut scheme = self.scheme.lock().expect("xunsearch scheme poisoned");
                     for doc in group {
-                        buf.extend_from_slice(&doc_commands(&mut scheme, doc, true));
+                        buf.extend_from_slice(&doc_commands(&mut scheme, doc, true)?);
                     }
                 }
                 buf.extend_from_slice(&pack_cmd(CMD_INDEX_SUBMIT, 0, 0, &[], &[]));
@@ -320,9 +367,17 @@ impl Engine for XunSearchEngine {
                 return Ok(());
             }
             let mut stream = self.connect(false).await?;
-            self.use_project(&mut stream, None).await?;
+            // 无 index ≡ "default"，与其余七个驱动的 `delete_in("default")` 一致
+            self.use_project(&mut stream, Some("default")).await?;
             self.send_removes(&mut stream, ids).await
         })
+    }
+
+    fn delete_bulk<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
+        // 默认实现逐 id 调 delete_in：每个 id 一次连接 + CMD_USE/SET_DB 握手（≈4 个
+        // 往返）。而 delete_in 本身就是「一次连接发完整批」，直接委托即可 ——
+        // 100 个 id 从 100 次连接变成 1 次。
+        self.delete_in(index, ids)
     }
 
     fn delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
@@ -403,177 +458,5 @@ impl Engine for XunSearchEngine {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn split_addrs_handles_boundary_ports() {
-        assert_eq!(
-            XunSearchEngine::split_addrs("127.0.0.1:8383"),
-            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
-        );
-        // 65535 没有下一个端口：曾经是 p + 1，debug 下溢出 panic、release 下得 0。
-        assert_eq!(
-            XunSearchEngine::split_addrs("127.0.0.1:65535"),
-            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
-        );
-        // 非法/缺失端口退回默认对
-        assert_eq!(
-            XunSearchEngine::split_addrs("127.0.0.1:not-a-port"),
-            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
-        );
-        assert_eq!(
-            XunSearchEngine::split_addrs("127.0.0.1"),
-            ("127.0.0.1:8383".to_string(), "127.0.0.1:8384".to_string())
-        );
-    }
-
-    #[test]
-    fn doc_commands_emit_expected_bytes() {
-        let mut scheme = FieldScheme::default();
-        let doc = SearchDocument::new("one", serde_json::json!({"title": "rust"})).unwrap();
-        let cmds = doc_commands(&mut scheme, &doc, true);
-        assert_eq!(
-            cmds,
-            vec![
-                163, 1, 0, 0, 3, 0, 0, 0, b'o', b'n', b'e', // INDEX_REQUEST(UPDATE, vno=0, "one")
-                162, 0x81, 0, 0, 3, 0, 0, 0, b'o', b'n', b'e', // DOC_INDEX(id: weight1|SAVEVALUE)
-                162, 1, 255, 0, 4, 0, 0, 0, b'r', b'u', b's', b't', // DOC_INDEX(mixed, vno=255)
-                162, 0x81, 1, 0, 4, 0, 0, 0, b'r', b'u', b's', b't', // DOC_INDEX(self+SAVEVALUE, vno=1)
-            ]
-        );
-        assert_eq!(scheme.field("title").map(|f| f.vno), Some(1)); // 动态方案已记录新字段
-    }
-
-    #[test]
-    fn doc_commands_skip_empty_values_and_dont_burn_vnos() {
-        // 数组/null/空串经 value_bytes 都是空字节：xapian 拒绝空词，这些字段也不该
-        // 占用动态 vno。引擎里曾有一份漏掉该 guard 的副本，且只有它真正在跑。
-        let mut scheme = FieldScheme::default();
-        let doc = SearchDocument::new(
-            "1",
-            serde_json::json!({"tags": ["a"], "meta": null, "title": ""}),
-        )
-        .unwrap();
-        let cmds = doc_commands(&mut scheme, &doc, false);
-        assert_eq!(
-            cmds,
-            vec![
-                163, 0, 0, 0, 0, 0, 0, 0, // INDEX_REQUEST(INIT)
-                162, 0x81, 0, 0, 1, 0, 0, 0, b'1', // DOC_INDEX(id: weight1|SAVEVALUE)
-            ]
-        );
-        for name in ["tags", "meta", "title"] {
-            assert!(!scheme.has_field(name), "{name} 不该占 vno");
-        }
-    }
-
-    #[test]
-    fn project_name_validation_is_deferred_to_first_use() {
-        // 项目名与库名同进 CMD_USE 包：`../../other_project` 曾原样发出（跳出项目 home）。
-        let bad = XunSearchEngine::new("127.0.0.1:8383", "../../other_project", None);
-        let err = bad.project_name().expect_err("非法项目名必须被拒");
-        assert!(
-            matches!(err, crate::ScoutError::InvalidIndexName(ref n) if n == "../../other_project"),
-            "got {err:?}"
-        );
-        // 正常项目名照旧，别把合规配置一起禁掉
-        let ok = XunSearchEngine::new("127.0.0.1:8383", "books", None);
-        assert_eq!(ok.project_name().unwrap(), "books");
-    }
-
-    #[tokio::test]
-    async fn invalid_project_fails_before_any_packet_is_sent() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let mut buf = [0u8; 1];
-            // 校验失败必须在写包之前返回：连接被放弃，读到 EOF(0) 而不是 CMD_USE(1)。
-            assert_eq!(sock.read(&mut buf).await.unwrap_or(0), 0, "非法项目名不得发出 CMD_USE");
-        });
-        // new() 把给定端口当 index 端口、search 取 port+1；监听器开在 search 端口上。
-        let engine = XunSearchEngine::new(&format!("127.0.0.1:{}", addr.port() - 1), "../../other_project", None);
-        let err = engine.search(&SearchBuilder::new("q")).await.expect_err("非法项目名必须报错");
-        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn search_round_trip_with_mock_server() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let (cmd, _, _, _) = read_packet(&mut sock).await.unwrap();
-            assert_eq!(cmd, CMD_USE);
-            sock.write_all(&pack_cmd(CMD_OK, 0, OK_PROJECT as u8, &[], &[])).await.unwrap();
-            let (cmd, _, _, _) = read_packet(&mut sock).await.unwrap();
-            assert_eq!(cmd, CMD_QUERY_INIT);
-            let (cmd, _, buf, _) = read_packet(&mut sock).await.unwrap();
-            assert_eq!(cmd, CMD_QUERY_PARSE);
-            assert_eq!(String::from_utf8_lossy(&buf), "hello");
-            let (cmd, _, _, buf1) = read_packet(&mut sock).await.unwrap();
-            assert_eq!(cmd, CMD_SEARCH_GET_RESULT);
-            assert_eq!(buf1, [0, 0, 0, 0, 10, 0, 0, 0]);
-            sock.write_all(&pack_cmd(CMD_OK, 0, OK_RESULT_BEGIN as u8, &1u32.to_le_bytes(), &[])).await.unwrap();
-            let mut doc = vec![1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]; // docid/rank/ccount
-            doc.extend_from_slice(&100i32.to_le_bytes()); // percent
-            doc.extend_from_slice(&3.5f32.to_le_bytes()); // weight
-            sock.write_all(&pack_cmd(CMD_SEARCH_RESULT_DOC, 0, 0, &doc, &[])).await.unwrap();
-            sock.write_all(&pack_cmd(CMD_SEARCH_RESULT_FIELD, 0, 0, b"one", &[])).await.unwrap();
-            sock.write_all(&pack_cmd(CMD_SEARCH_RESULT_FIELD, 0, 255, b"hello world", &[])).await.unwrap();
-            sock.write_all(&pack_cmd(CMD_OK, 0, OK_RESULT_END as u8, &[], &[])).await.unwrap();
-        });
-        // new() 把给定端口当 index 端口、search 取 port+1；监听器开在 search 端口上。
-        let engine = XunSearchEngine::new(&format!("127.0.0.1:{}", addr.port() - 1), "books", None);
-        let result = engine.search(&SearchBuilder::new("hello")).await.unwrap();
-        assert_eq!(result.total, 1);
-        assert_eq!(result.hits.len(), 1);
-        assert_eq!(result.hits[0].id, "one");
-        assert_eq!(result.hits[0].score, Some(3.5));
-        assert_eq!(result.hits[0].source, serde_json::json!({"body": "hello world"}));
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn empty_where_in_matches_nothing_instead_of_erroring() {
-        // 回归：守卫原先数「子句」而不是「值」，于是空集合被当成「本引擎不支持
-        // where_in」报 Unsupported，而基准语义是「空 IN = 不匹配任何」→ Ok(空)。
-        // 指向不可达地址：真去连就会失败，返回 Ok 说明在连接之前就短路了。
-        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
-        let r = engine
-            .search(&SearchBuilder::new("q").where_in("tag", Vec::<&str>::new()))
-            .await
-            .unwrap();
-        assert!(r.hits.is_empty() && r.total == 0);
-    }
-
-    #[tokio::test]
-    async fn empty_where_not_in_is_not_an_unsupported_error() {
-        // 空 NOT IN = 无过滤，不该报「不支持 where_in/where_not_in」。
-        // 这里只断言「不是 Unsupported」——真发查询会连不上，那是 Http/IO 类错误。
-        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
-        let err = engine
-            .search(&SearchBuilder::new("q").where_not_in("tag", Vec::<&str>::new()))
-            .await
-            .unwrap_err();
-        assert!(
-            !matches!(err, crate::ScoutError::Unsupported(_)),
-            "空 NOT IN 不该报 Unsupported，得到 {err:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn flush_validates_the_index_name_before_connecting() {
-        // 回归：flush 原先忽略 _index（既不过滤也不校验），flush("_all") 会静默成功。
-        // 其余驱动都会先过 validate_index_name，这里必须一致。
-        let engine = XunSearchEngine::new("127.0.0.1:1", "proj", None);
-        let err = engine.flush("_all").await.unwrap_err();
-        assert!(
-            matches!(err, crate::ScoutError::InvalidIndexName(_)),
-            "_all 必须在连接之前被拒，得到 {err:?}"
-        );
-    }
-
-}
+#[path = "xunsearch_engine_tests.rs"]
+mod tests;

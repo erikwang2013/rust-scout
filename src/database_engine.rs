@@ -84,35 +84,49 @@ impl DatabaseEngine {
     async fn delete_by_ids(&self, ids: &[String]) -> Result<()> {
         let pool = self.pool.clone();
         Self::ensure_schema(&pool).await?;
+        // 整批一个事务（与 write_all 同款）：逐条 `execute(&pool)` 时每条 DELETE 都是
+        // 独立隐式事务，SQLite 默认 rollback journal + synchronous=FULL 每条都要
+        // fsync，1000 个 id 就是 1000 次同步。语义不变：不存在的 id 静默跳过。
+        let mut tx = pool.begin().await?;
         for id in ids {
             sqlx::query("DELETE FROM scout_documents WHERE id = ?")
                 .bind(id)
-                .execute(&pool)
+                .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn delete_in_impl(&self, index: &str, ids: &[String]) -> Result<()> {
+        // 校验先于任何数据库操作（与其余驱动、与 soft_delete_in 同序）：进程内驱动
+        // 没有被 ES 展开成多索引的风险，但契约要统一——否则 delete_in("_all")
+        // 在这里 Ok、在 ES 上 Err。
+        crate::validate_index_name(index)?;
         let pool = self.pool.clone();
         Self::ensure_schema(&pool).await?;
+        let mut tx = pool.begin().await?;
         for id in ids {
             sqlx::query("DELETE FROM scout_documents WHERE index_name = ? AND id = ?")
                 .bind(index)
                 .bind(id)
-                .execute(&pool)
+                .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn soft_delete_impl(&self, ids: &[String]) -> Result<()> {
         let pool = self.pool.clone();
         Self::ensure_schema(&pool).await?;
+        // 读-改-写整体进同一事务：除了省掉每 id 一次的 fsync，UPDATE 拿到的写锁
+        // 持有到 commit，中间不会有别的连接插进来改同一份 data。
+        let mut tx = pool.begin().await?;
         for id in ids {
             let row = sqlx::query("SELECT data FROM scout_documents WHERE id = ?")
                 .bind(id)
-                .fetch_optional(&pool)
+                .fetch_optional(&mut *tx)
                 .await?;
             let Some(row) = row else { continue };
             let data: String = row.try_get("data")?;
@@ -122,17 +136,27 @@ impl DatabaseEngine {
             sqlx::query("UPDATE scout_documents SET data = ? WHERE id = ?")
                 .bind(serde_json::to_string(&fields)?)
                 .bind(id)
-                .execute(&pool)
+                .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn reindex_impl(&self, from: &str, to: &str) -> Result<()> {
         let pool = self.pool.clone();
         Self::ensure_schema(&pool).await?;
-        // 一行 SQL 移动索引归属；to 中已存在相同 id 的行会触发主键冲突
-        // （id 全局唯一，重索引重叠时整批中止）。
+        // 这是**移动**不是复制：from 的文档改归属到 to，from 随即为空。
+        //
+        // 为什么不做真复制：id 是全局主键（见模块头），复制到 to 时同 id 行会撞
+        // 主键，除非把 id 改成 (index_name, id) 复合主键——那是 schema 变更，本驱动
+        // 不做。所以保留移动语义并在此显式标注；trait 文档与 README 的驱动表按
+        // 移动描述（CollectionEngine 才是复制：to 的既有内容被整体替换）。
+        //
+        // 一行 SQL 即完成。原注释说「to 中已有同 id 的行会撞主键、整批中止」——
+        // id 是全局主键，同一 id 全表只有一行，to 里不可能另有一行与 from 的文档
+        // 同 id，这个冲突在本 schema 下构造不出来；旧说法已作废（见
+        // reindex_moves_documents_and_empties_source 的移动语义测试）。
         sqlx::query("UPDATE scout_documents SET index_name = ? WHERE index_name = ?")
             .bind(to)
             .bind(from)
@@ -182,20 +206,27 @@ impl DatabaseEngine {
             })
             .collect::<Result<_>>()?;
 
-        let mut hits: Vec<SearchHit> = docs
+        // 先排引用、取完窗口再物化：命中上万条时不必为落选的行深拷贝 fields。
+        let mut matched: Vec<&SearchDocument> = docs
             .iter()
             .filter(|doc| trashed_allows(builder, doc))
             .filter(|doc| builder.matches(doc))
-            .map(SearchHit::from)
             .collect();
-        builder.sort_hits(&mut hits);
+        matched.sort_by(|a, b| {
+            builder.sort_cmp((Some(&a.fields), a.id.as_str()), (Some(&b.fields), b.id.as_str()))
+        });
 
         // 与 CollectionEngine::selected 一致：total 是**过滤后**的命中总数，
         // 分页在最后一步切。
-        let total = hits.len();
+        let total = matched.len();
         let offset = builder.skip.unwrap_or(0);
         let take = builder.take.unwrap_or(total);
-        let hits = hits.into_iter().skip(offset).take(take).collect();
+        let hits = matched
+            .into_iter()
+            .skip(offset)
+            .take(take)
+            .map(SearchHit::from)
+            .collect();
 
         Ok(SearchResult {
             hits,
@@ -267,16 +298,32 @@ impl Engine for DatabaseEngine {
 
     fn create_index<'a>(
         &'a self,
-        _index: &'a str,
+        index: &'a str,
         _settings: serde_json::Value,
     ) -> EngineFuture<'a, ()> {
-        // no-op：单表结构，索引维度只是 index_name 列。
-        Box::pin(async move { Ok(()) })
+        // no-op：单表结构，索引维度只是 index_name 列。但名字还是要校验 ——
+        // 其余驱动（含 ES）都拒保留名，这里放行会让 `_all` 的行为随驱动漂移。
+        Box::pin(async move {
+            crate::validate_index_name(index)?;
+            Ok(())
+        })
     }
 
-    fn delete_index<'a>(&'a self, _index: &'a str) -> EngineFuture<'a, ()> {
-        // no-op：无独立索引存储，索引维度只是 index_name 列。
-        Box::pin(async move { Ok(()) })
+    fn delete_index<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
+        Box::pin(async move {
+            crate::validate_index_name(index)?;
+            let pool = self.pool.clone();
+            Self::ensure_schema(&pool).await?;
+            // 真删该索引的行。此前这里是 no-op：而 README（及 12 份译文）的索引
+            // 生命周期把 delete_index 当作「清空索引」的入口——update → delete_index
+            // → search 仍返回全部旧文档，文档与行为相反。只按 index_name 删，
+            // 其它索引的行（哪怕 id 相同）不在 WHERE 范围内。
+            sqlx::query("DELETE FROM scout_documents WHERE index_name = ?")
+                .bind(index)
+                .execute(&pool)
+                .await?;
+            Ok(())
+        })
     }
 
     fn update_bulk<'a>(&'a self, docs: &'a [SearchDocument]) -> EngineFuture<'a, ()> {
@@ -294,13 +341,15 @@ impl Engine for DatabaseEngine {
             crate::validate_index_name(index)?;
             let pool = self.pool.clone();
             Self::ensure_schema(&pool).await?;
+            // 一个事务包住 SELECT+UPDATE 循环（理由同 soft_delete_impl）。
+            let mut tx = pool.begin().await?;
             for id in ids {
                 let row = sqlx::query(
                     "SELECT data FROM scout_documents WHERE index_name = ? AND id = ?",
                 )
                 .bind(index)
                 .bind(id)
-                .fetch_optional(&pool)
+                .fetch_optional(&mut *tx)
                 .await?;
                 let Some(row) = row else { continue };
                 let data: String = row.try_get("data")?;
@@ -311,9 +360,10 @@ impl Engine for DatabaseEngine {
                     .bind(serde_json::to_string(&fields)?)
                     .bind(index)
                     .bind(id)
-                    .execute(&pool)
+                    .execute(&mut *tx)
                     .await?;
             }
+            tx.commit().await?;
             Ok(())
         })
     }
@@ -328,238 +378,5 @@ impl Engine for DatabaseEngine {
 }
 
 #[cfg(all(test, feature = "database"))]
-mod tests {
-    use super::*;
-
-    async fn engine() -> DatabaseEngine {
-        // 内存库每个连接是独立的，锁死单连接保证共享同一库。
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        DatabaseEngine::from_pool(pool, vec!["title".to_string(), "body".to_string()])
-    }
-
-    fn doc(id: &str, index: Option<&str>, fields: serde_json::Value) -> SearchDocument {
-        let mut d = SearchDocument::new(id, fields).unwrap();
-        d.index = index.map(str::to_string);
-        d
-    }
-
-    #[test]
-    fn escape_like_neutralises_wildcards() {
-        assert_eq!(escape_like("plain"), "plain");
-        assert_eq!(escape_like("50%"), "50\\%");
-        assert_eq!(escape_like("a_b"), "a\\_b");
-        // 反斜杠自身必须转义，否则会吃掉后插入的转义符
-        assert_eq!(escape_like("a\\b"), "a\\\\b");
-    }
-
-    #[tokio::test]
-    async fn pagination_is_applied_after_wheres_not_before() {
-        // SQL 先 LIMIT 再内存过滤时：take(2) 取回前 2 条，两条都被 where 滤掉，
-        // 结果是 0 条——而真正命中的第 3 条永远取不回来。
-        let engine = engine().await;
-        engine
-            .update(&[
-                doc("a", Some("books"), serde_json::json!({"title": "x", "cat": "news"})),
-                doc("b", Some("books"), serde_json::json!({"title": "y", "cat": "news"})),
-                doc("c", Some("books"), serde_json::json!({"title": "z", "cat": "tech"})),
-            ])
-            .await
-            .unwrap();
-
-        let r = engine
-            .search(
-                &SearchBuilder::new("")
-                    .within("books")
-                    .where_field("cat", "tech")
-                    .take(2),
-            )
-            .await
-            .unwrap();
-        assert_eq!(r.hits.len(), 1, "窗口外的匹配行被 SQL LIMIT 丢掉了");
-        assert_eq!(r.hits[0].id, "c");
-        assert_eq!(r.total, 1, "total 应是过滤后的命中数，与 CollectionEngine 一致");
-
-        // skip 在过滤之后生效
-        let r = engine
-            .search(
-                &SearchBuilder::new("")
-                    .within("books")
-                    .order_by("title", false)
-                    .skip(1)
-                    .take(2),
-            )
-            .await
-            .unwrap();
-        assert_eq!(r.hits.len(), 2);
-        assert_eq!(r.total, 3);
-    }
-
-    #[tokio::test]
-    async fn like_wildcards_in_query_are_treated_literally() {
-        let engine = engine().await;
-        engine
-            .update(&[
-                doc("pct", None, serde_json::json!({"title": "50% off"})),
-                doc("num", None, serde_json::json!({"title": "50123 items"})),
-            ])
-            .await
-            .unwrap();
-
-        // "%" 是字面量：只应命中真正含 "50%" 的那条，total 不该把 "50123" 算进去
-        let r = engine.search(&SearchBuilder::new("50%")).await.unwrap();
-        assert_eq!(r.hits.len(), 1);
-        assert_eq!(r.hits[0].id, "pct");
-        assert_eq!(r.total, 1, "SQL 层 total 不应被 LIKE 通配符放大");
-    }
-
-    #[tokio::test]
-    async fn update_then_search_finds_matches() {
-        let e = engine().await;
-        e.update(&[doc(
-            "one",
-            Some("books"),
-            serde_json::json!({"title": "Hello world", "body": "intro"}),
-        )])
-        .await
-        .unwrap();
-        let result = e
-            .search(&SearchBuilder::new("hello").within("books"))
-            .await
-            .unwrap();
-        assert_eq!(result.total, 1);
-        assert_eq!(result.hits[0].id, "one");
-        assert_eq!(result.hits[0].source["title"], "Hello world");
-    }
-
-    #[tokio::test]
-    async fn like_filter_is_scoped_to_index() {
-        let e = engine().await;
-        e.update(&[
-            doc("one", Some("books"), serde_json::json!({"title": "Rust"})),
-            doc("two", Some("movies"), serde_json::json!({"title": "Rust"})),
-        ])
-        .await
-        .unwrap();
-        let result = e
-            .search(&SearchBuilder::new("rust").within("books"))
-            .await
-            .unwrap();
-        assert_eq!(result.total, 1);
-        assert_eq!(result.hits[0].id, "one");
-    }
-
-    #[tokio::test]
-    async fn wheres_filtered_total_matches_collection_engine() {
-        // 这个用例原先断言 total == 2（SQL 层计数），把「SQL 先截断」的 bug 当成
-        // 预期行为锁住了。现在两个驱动必须给出同样的结论。
-        let docs = [
-            doc(
-                "one",
-                Some("books"),
-                serde_json::json!({"title": "Rust", "category": "tech"}),
-            ),
-            doc(
-                "two",
-                Some("books"),
-                serde_json::json!({"title": "Rust", "category": "fiction"}),
-            ),
-        ];
-        let e = engine().await;
-        e.update(&docs).await.unwrap();
-
-        let builder = SearchBuilder::new("rust")
-            .within("books")
-            .where_field("category", "tech");
-        let db_result = e.search(&builder).await.unwrap();
-
-        let reference = crate::CollectionEngine::new();
-        reference.update(&docs).await.unwrap();
-        let ref_result = reference.search(&builder).await.unwrap();
-
-        assert_eq!(db_result.hits.len(), 1);
-        assert_eq!(db_result.hits[0].id, "one");
-        assert_eq!(
-            db_result.total, ref_result.total,
-            "database 与 collection 的 total 必须一致（都是过滤后的命中数）"
-        );
-        assert_eq!(db_result.total, 1);
-    }
-
-    #[tokio::test]
-    async fn soft_delete_three_states() {
-        let e = engine().await;
-        e.update(&[
-            doc("one", Some("books"), serde_json::json!({"title": "Alpha"})),
-            doc("two", Some("books"), serde_json::json!({"title": "Beta"})),
-        ])
-        .await
-        .unwrap();
-        e.soft_delete(&["one".to_string()]).await.unwrap();
-
-        let excluded = e
-            .search(&SearchBuilder::new("").within("books"))
-            .await
-            .unwrap();
-        assert_eq!(excluded.hits.len(), 1);
-        assert_eq!(excluded.hits[0].id, "two");
-
-        let only = e
-            .search(&SearchBuilder::new("").within("books").only_trashed())
-            .await
-            .unwrap();
-        assert_eq!(only.hits.len(), 1);
-        assert_eq!(only.hits[0].id, "one");
-
-        let all = e
-            .search(&SearchBuilder::new("").within("books").with_trashed())
-            .await
-            .unwrap();
-        assert_eq!(all.hits.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn reindex_moves_documents() {
-        let e = engine().await;
-        e.update(&[doc("one", Some("books"), serde_json::json!({"title": "Rust"}))])
-            .await
-            .unwrap();
-        e.reindex("books", "archive").await.unwrap();
-        let archive = e
-            .search(&SearchBuilder::new("").within("archive"))
-            .await
-            .unwrap();
-        assert_eq!(archive.total, 1);
-        assert_eq!(archive.hits[0].id, "one");
-        let books = e
-            .search(&SearchBuilder::new("").within("books"))
-            .await
-            .unwrap();
-        assert_eq!(books.total, 0);
-    }
-
-    #[tokio::test]
-    async fn delete_removes_by_id_across_indexes() {
-        let e = engine().await;
-        e.update(&[
-            doc("one", Some("books"), serde_json::json!({"title": "Rust"})),
-            doc("two", Some("movies"), serde_json::json!({"title": "Rust"})),
-        ])
-        .await
-        .unwrap();
-        e.delete(&["one".to_string()]).await.unwrap();
-        let books = e
-            .search(&SearchBuilder::new("").within("books"))
-            .await
-            .unwrap();
-        assert_eq!(books.total, 0);
-        let movies = e
-            .search(&SearchBuilder::new("").within("movies"))
-            .await
-            .unwrap();
-        assert_eq!(movies.total, 1);
-    }
-}
+#[path = "database_engine_tests.rs"]
+mod tests;

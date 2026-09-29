@@ -15,11 +15,12 @@ pub mod error;
 pub mod manager;
 #[cfg(feature = "meilisearch")]
 pub mod meilisearch_engine;
+#[cfg(feature = "meilisearch")]
+mod meilisearch_query;
 #[cfg(feature = "null")]
 pub mod null_engine;
 pub mod pet;
 pub mod result;
-pub mod searchable;
 #[cfg(feature = "typesense")]
 pub mod typesense_engine;
 #[cfg(feature = "typesense")]
@@ -29,13 +30,17 @@ pub mod xunsearch_engine;
 #[cfg(feature = "xunsearch")]
 mod xunsearch_query;
 #[cfg(all(test, feature = "xunsearch"))]
+mod xunsearch_mock;
+#[cfg(all(test, feature = "xunsearch"))]
 mod xunsearch_tests;
 
 #[cfg(feature = "algolia")]
 pub use algolia_engine::AlgoliaEngine;
 pub use builder::{SearchBuilder, TrashedFilter};
 pub use collection_engine::CollectionEngine;
-pub use config::{validate_index_name, ScoutConfig};
+pub use config::{
+    validate_field_name, validate_host, validate_index_name, ScoutConfig,
+};
 #[cfg(feature = "database")]
 pub use database_engine::DatabaseEngine;
 pub use document::SearchDocument;
@@ -53,4 +58,3 @@ pub use xunsearch_engine::XunSearchEngine;
 pub use error::{Result, ScoutError};
 pub use manager::EngineManager;
 pub use result::{SearchHit, SearchResult};
-pub use searchable::{Searchable, SearchableStore};

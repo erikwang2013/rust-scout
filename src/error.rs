@@ -5,8 +5,16 @@ use thiserror::Error;
 /// 例如 `--features xunsearch`（`Backend` 存在但那个臂被门控掉）会直接编译失败。
 #[derive(Debug, Error)]
 pub enum ScoutError {
-    #[error("invalid index name `{0}`: must be non-empty, contain no whitespace, contain no '/', and not start with '.'")]
+    #[error(
+        "invalid index name `{0}`: must be non-empty; no whitespace or `/` `\\` `*` `?` `,` `+` `\"` `'` `;` or backtick; \
+         must not start with `.` `-` or `_`"
+    )]
     InvalidIndexName(String),
+    /// 刻意**不带**原始 host：带 userinfo 的地址一旦回显，密码就换个地方泄漏。
+    #[error("invalid host: {0}")]
+    InvalidHost(String),
+    #[error("invalid field name `{0}`: only letters, digits, `_`, `-` and `.` are allowed")]
+    InvalidFieldName(String),
     #[error("invalid search result: {0}")]
     InvalidResult(String),
     #[error("unsupported operation: {0}")]

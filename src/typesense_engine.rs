@@ -5,10 +5,29 @@ use serde_json::{Map, Value};
 use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
 use crate::typesense_query::{
-    check_import, check_status, ndjson_payload, offset_limit, page_offset, parse_search_response,
-    search_params,
+    check_import, check_status, id_filter, ndjson_payload, offset_limit, page_offset,
+    parse_search_response, search_params,
 };
 use crate::{SearchBuilder, SearchDocument, SearchResult};
+
+/// `delete-by-query` 的分块：`limit` 上限 250，一次超过就会被后端拒绝。
+const SOFT_DELETE_CHUNK: usize = 250;
+
+/// 客户端：同源重定向 + 超时。
+///
+/// - 超时：reqwest 的 async 默认 `connect_timeout`/`timeout` 都是 `None`，
+///   接得上 TCP 却不回包的 peer 会让请求永久挂起。
+/// - 重定向：reqwest 换 host 时只摘 `Authorization`/`Cookie` 等 5 个已知头，
+///   **自定义头不动**，`X-TYPESENSE-API-KEY` 会被 302 原样送到别的 host。
+///   不用 `Policy::none()`：那连反向代理的同源跳转一起掐掉。
+fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(crate::config::same_origin_redirect_policy())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
 
 /// Typesense 引擎。文档主键为 `id` 字符串字段；写入走 NDJSON import
 /// （upsert 语义），软删除标记 `__soft_deleted` 布尔字段。
@@ -24,7 +43,7 @@ impl TypesenseEngine {
         Self {
             host: host.trim_end_matches('/').to_string(),
             api_key,
-            client: reqwest::Client::new(),
+            client: client(),
         }
     }
 
@@ -37,6 +56,9 @@ impl TypesenseEngine {
         body: Option<String>,
         content_type: Option<&str>,
     ) -> crate::Result<(reqwest::StatusCode, String)> {
+        // 校验先于任何 I/O：带 userinfo 的 host 一旦请求失败，reqwest 的错误
+        // Display 会把完整 URL（含密码）拼进日志。
+        crate::validate_host(&self.host)?;
         let mut request = self.client.request(method.clone(), format!("{}{}", self.host, path));
         if let Some(api_key) = &self.api_key {
             request = request.header("X-TYPESENSE-API-KEY", api_key);
@@ -57,8 +79,8 @@ impl TypesenseEngine {
     }
 
     /// DELETE 请求；404 视为成功（文档/集合不存在）。
-    async fn delete_ok(&self, path: &str) -> crate::Result<()> {
-        let (status, text) = self.raw(reqwest::Method::DELETE, path, None, None, None).await?;
+    async fn delete_ok(&self, path: &str, query: Option<&[(String, String)]>) -> crate::Result<()> {
+        let (status, text) = self.raw(reqwest::Method::DELETE, path, query, None, None).await?;
         if status == reqwest::StatusCode::NOT_FOUND {
             return Ok(());
         }
@@ -113,7 +135,7 @@ impl TypesenseEngine {
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Ok(SearchResult::default());
         }
-        let params = search_params(builder, offset, limit);
+        let params = search_params(builder, offset, limit)?;
         let path = format!("/collections/{}/documents/search", percent_encode(index));
         let (status, text) = self.raw(reqwest::Method::GET, &path, Some(&params), None, None).await?;
         check_status("GET", &path, &status, &text)?;
@@ -133,15 +155,16 @@ impl Engine for TypesenseEngine {
     fn delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            for id in ids {
-                self.delete_ok(&format!(
-                    "/collections/{}/documents/{}",
-                    percent_encode(index),
-                    percent_encode(id)
-                ))
-                .await?;
+            if ids.is_empty() {
+                // 一次 DELETE 都不发：`id:=[]` 的语义由后端定，别赌它。
+                return Ok(());
             }
-            Ok(())
+            // delete-by-query 一次删完（`id` 默认索引）。返回 `num_deleted` 而不是
+            // 逐条 404，所以「重复删除返回 Ok」的幂等语义不变；集合不存在仍是 404，
+            // 由 delete_ok 吃掉。
+            let path = format!("/collections/{}/documents", percent_encode(index));
+            let query = vec![("filter_by".to_string(), id_filter(ids))];
+            self.delete_ok(&path, Some(&query)).await
         })
     }
     fn search<'a>(&'a self, builder: &'a SearchBuilder) -> EngineFuture<'a, SearchResult> {
@@ -180,7 +203,7 @@ impl Engine for TypesenseEngine {
     fn delete_index<'a>(&'a self, index: &'a str) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            self.delete_ok(&format!("/collections/{}", percent_encode(index))).await
+            self.delete_ok(&format!("/collections/{}", percent_encode(index)), None).await
         })
     }
     fn update_bulk<'a>(&'a self, docs: &'a [SearchDocument]) -> EngineFuture<'a, ()> {
@@ -197,104 +220,55 @@ impl Engine for TypesenseEngine {
         })
     }
     fn delete_bulk<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
-        // 与 delete_in 相同：逐条 DELETE（Typesense 无批量删除端点）。
+        // 与 delete_in 相同：delete-by-query 一次删完。
         self.delete_in(index, ids)
     }
     /// 仅作用于 `index`。Typesense 无部分更新：先按 id 搜出原文档，再整体
     /// upsert 打标版本（搜不到则跳过）。
+    ///
+    /// 读侧按 id 集合批量搜、写侧一次 import（原先每条 id 一次搜索 + 一次
+    /// import = 2N 次往返）。批量搜的 `limit` 上限是 250，**超了会静默少标**，
+    /// 所以按 `SOFT_DELETE_CHUNK` 分块；写侧本来就是批量。
     ///
     /// 不带索引的 [`Engine::soft_delete`] 在本驱动上不可用（见 `engine.rs` 说明）：
     /// 原先它硬编码 `default`，对写在其它索引里的文档会静默跳过却返回 Ok。
     fn soft_delete_in<'a>(&'a self, index: &'a str, ids: &'a [String]) -> EngineFuture<'a, ()> {
         Box::pin(async move {
             crate::validate_index_name(index)?;
-            for id in ids {
-                let builder = SearchBuilder::new("").within(index).where_field("id", id.clone());
+            let mut docs: Vec<SearchDocument> = Vec::new();
+            for chunk in ids.chunks(SOFT_DELETE_CHUNK) {
+                // 默认的 Exclude 过滤（跳过已软删的 id），与 meilisearch 的
+                // soft_delete_in 一致。读-改-写会把搜到的整份文档重新 import 一遍，
+                // 搜索响应没返回的字段就此丢失；已软删的文档本就处于目标状态，
+                // 再写一遍只是白白承担这份字段丢失风险，末尾状态却完全一样。
+                let builder = SearchBuilder::new("")
+                    .within(index)
+                    .take(SOFT_DELETE_CHUNK)
+                    .where_in("id", chunk.iter().map(String::as_str).collect::<Vec<_>>());
                 let result = self.search(&builder).await?;
-                let Some(hit) = result.hits.first() else {
-                    continue;
-                };
-                let mut fields: Map<String, Value> = match &hit.source {
-                    Value::Object(map) => map.clone(),
-                    _ => Map::new(),
-                };
-                fields.insert("__soft_deleted".into(), Value::Bool(true));
-                let doc = SearchDocument {
-                    id: id.clone(),
-                    index: None,
-                    fields,
-                };
-                self.import_docs(index, &[&doc]).await?;
+                for hit in result.hits {
+                    let mut fields: Map<String, Value> = match &hit.source {
+                        Value::Object(map) => map.clone(),
+                        _ => Map::new(),
+                    };
+                    fields.insert("__soft_deleted".into(), Value::Bool(true));
+                    docs.push(SearchDocument {
+                        id: hit.id,
+                        index: None,
+                        fields,
+                    });
+                }
             }
-            Ok(())
+            if docs.is_empty() {
+                return Ok(()); // 全都没搜到：别发一次空的 import
+            }
+            let refs: Vec<&SearchDocument> = docs.iter().collect();
+            self.import_docs(index, &refs).await
         })
     }
     // reindex：trait 默认 Unsupported（Typesense 无原生端点）。
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn flush_is_a_noop_and_makes_no_request() {
-        // 指向必然连不上的地址：真的打网络就会失败，返回 Ok 即证明没有请求。
-        // flush 的契约是「刷新可见性」，绝不能是清空索引——README 的生命周期示例
-        // 在 update 与 search 之间调用它，而这里曾删掉整个索引并返回 Ok。
-        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
-        engine.flush("books").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn index_less_soft_delete_is_refused_not_silently_skipped() {
-        // 曾经它硬编码 default：对写在别的索引里的文档静默跳过却返回 Ok。
-        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
-        let err = engine
-            .soft_delete(&["b1".to_string()])
-            .await
-            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
-        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
-    }
-
-    #[tokio::test]
-    async fn take_zero_keeps_total_and_drops_hits() {
-        // take(0) 的契约（Collection/ES 基准）是「命中总数 + 空 hits」：total 在分页
-        // 之前算出。实现改为照发请求（只取 1 条）再清空 hits，见 result.rs::without_hits。
-        let r = SearchResult {
-            hits: vec![],
-            total: 7,
-            ..SearchResult::default()
-        };
-        let trimmed = r.without_hits();
-        assert!(trimmed.hits.is_empty());
-        assert_eq!(trimmed.total, 7);
-    }
-
-    #[tokio::test]
-    async fn empty_where_in_short_circuits_search_and_paginate() {
-        // 回归：空 where_in 集合 = 不匹配任何（Collection 语义），曾被拼成
-        // `tag:=[]` 丢给后端（行为由后端决定：报错或匹配全部）。
-        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
-        let builder = SearchBuilder::new("")
-            .within("books")
-            .where_in("tag", Vec::<&str>::new());
-        let result = engine.search(&builder).await.unwrap();
-        assert!(result.hits.is_empty());
-        assert_eq!(result.total, 0);
-        // paginate 走 search_page 的同一条短路，不能只在 search 上修。
-        let paged = engine.paginate(&builder, 2, 10).await.unwrap();
-        assert!(paged.hits.is_empty());
-        assert_eq!(paged.total, 0);
-    }
-
-    #[tokio::test]
-    async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
-        let engine = TypesenseEngine::new("http://127.0.0.1:1".to_string(), None);
-        let err = engine
-            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
-    }
-
-}
+#[path = "typesense_engine_tests.rs"]
+mod tests;

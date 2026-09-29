@@ -1,6 +1,6 @@
 [package]
 name = "rust-scout"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "Scout-style full-text search engine abstraction for Rust"
 license = "MIT"
@@ -19,16 +19,19 @@ tokio = { version = "1", features = ["net", "io-util", "sync", "time"], optional
 [dependencies.reqwest]
 version = "0.12"
 default-features = false
-features = ["json", "rustls-tls", "blocking"]
+features = ["json", "rustls-tls"]
 optional = true
 
 [features]
 default = []
 elasticsearch = ["dep:reqwest"]
 xunsearch = ["dep:tokio"]
-meilisearch = ["dep:reqwest"]
+# meilisearch / algolia 的写入是「任务制」：POST 只入队，成败要看 /tasks/{uid}。
+# 驱动会轮询到任务结束（否则写入失败会被静默吞掉），所以这两个特性需要 tokio 的
+# 异步定时器 —— 不能在 async 里 `thread::sleep`，那会占死一个运行时工作线程。
+meilisearch = ["dep:reqwest", "dep:tokio"]
 typesense = ["dep:reqwest"]
-algolia = ["dep:reqwest"]
+algolia = ["dep:reqwest", "dep:tokio"]
 database = ["dep:sqlx"]
 null = []
 

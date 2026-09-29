@@ -26,11 +26,6 @@ pub trait Engine: Send + Sync {
         page: usize,
         per_page: usize,
     ) -> EngineFuture<'a, SearchResult>;
-    /// 从查询结果里取出命中 id。默认即 [`SearchResult::ids`]，八个驱动行为
-    /// 一致；只有需要改写 id 形态（前缀、规范化）的驱动才覆写。
-    fn map_ids(&self, result: &SearchResult) -> Vec<String> {
-        result.ids()
-    }
     /// 刷新索引，让已写入的文档对搜索可见。
     ///
     /// **不是清空索引** —— 要删除索引用 [`Self::delete_index`]。默认实现是
@@ -100,6 +95,11 @@ pub trait Engine: Send + Sync {
     /// 重建索引：把 from 索引的内容复制到 to 索引。语义因引擎而异：
     /// CollectionEngine 直接替换 to 索引的既有内容；ElasticsearchEngine 委托
     /// 后端 `_reindex`（合并进 to，发生冲突时整批中止）。
+    ///
+    /// **例外：`DatabaseEngine` 是「移动」而不是「复制」** —— from 会被清空。
+    /// 它的表里 `id` 是全局主键（同一 id 不可能同时存在于两个索引），所以复制
+    /// 在这个 schema 下做不到。需要「from 保留」的语义就别走 database 驱动。
+    /// 其余引擎（Collection / ES / Algolia）from 保持不变。
     fn reindex<'a>(&'a self, from: &'a str, to: &'a str) -> EngineFuture<'a, ()> {
         let _ = (from, to);
         Box::pin(async move {

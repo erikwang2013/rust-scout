@@ -1,10 +1,12 @@
 #![cfg(feature = "meilisearch")]
 
+use std::time::Duration;
+
 use serde_json::{Map, Value};
 
 use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
-use crate::{SearchBuilder, SearchDocument, SearchHit, SearchResult, TrashedFilter};
+use crate::{SearchBuilder, SearchDocument, SearchResult};
 
 /// 分页模式。**两种模式的总数语义不同**，这是选它的唯一理由：
 ///
@@ -17,10 +19,15 @@ use crate::{SearchBuilder, SearchDocument, SearchHit, SearchResult, TrashedFilte
 /// 所以：窗口页对齐时走 `Page`（`paginate` 永远对齐，普通 `search` 在
 /// `skip` 是 `take` 整数倍时也对齐），只有真正页对不齐时才退回 `Offset`。
 /// 两者互斥，Meilisearch 拒绝同时出现。
-enum PageMode {
+pub(crate) enum PageMode {
     Page(usize, usize),
     Offset(usize, usize),
 }
+
+/// 写入任务（`/tasks/{uid}`）的轮询间隔与总超时。超时即报错，不静默接受
+/// 「结果未知」——官方 SDK 同样在超时时抛错。
+const TASK_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const TASK_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Meilisearch 引擎。文档主键固定为 `id` 字段（add-or-replace 语义）；
 /// 软删除标记为 `__soft_deleted` 布尔字段。
@@ -35,11 +42,23 @@ impl MeilisearchEngine {
         Self {
             host: host.trim_end_matches('/').to_string(),
             api_key,
-            client: reqwest::Client::new(),
+            // 必须给超时：reqwest 的默认是 `timeout: None` + `connect_timeout: None`，
+            // 一个「接了 TCP 但不回包」的服务端会让调用永久挂住且无法取消。
+            // redirect 限同源：Meili 用头传凭据，后端回 302 到别的 host 就把 key
+            // 带出去了。builder 出错时退回默认 client —— `new()` 保持不会失败。
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .redirect(crate::config::same_origin_redirect_policy())
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
     /// 发送请求，返回状态码 + body 文本；网络错误经 `?` 转 `ScoutError::Http`。
+    ///
+    /// host 在这里校验：带着 `user:pass@` 的 host 一旦请求失败，reqwest 的错误
+    /// `Display` 会把完整 URL（含密码）拼进日志。
     async fn raw(
         &self,
         method: reqwest::Method,
@@ -47,6 +66,7 @@ impl MeilisearchEngine {
         body: Option<String>,
         content_type: Option<&str>,
     ) -> crate::Result<(reqwest::StatusCode, String)> {
+        crate::validate_host(&self.host)?;
         let mut request = self
             .client
             .request(method.clone(), format!("{}{}", self.host, path));
@@ -89,136 +109,44 @@ impl MeilisearchEngine {
         Ok(serde_json::from_str(&body)?)
     }
 
-    /// filter 值：字符串加双引号（转义 `\` 与 `"`），数字/bool 裸值。
-    fn filter_value(v: &Value) -> String {
-        match v {
-            Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
-            Value::Bool(b) => b.to_string(),
-            Value::Number(n) => n.to_string(),
-            other => other.to_string(),
-        }
-    }
-
-    /// 等值/IN/软删除 → Meilisearch filter 表达式；无任何条件时返回 None。
-    fn build_filter(builder: &SearchBuilder) -> Option<String> {
-        let mut parts: Vec<String> = Vec::new();
-        for w in &builder.wheres {
-            parts.push(format!("{}={}", w.field, Self::filter_value(&w.value)));
-        }
-        for (field, values) in &builder.where_ins {
-            let list = values.iter().map(Self::filter_value).collect::<Vec<_>>().join(", ");
-            parts.push(format!("{} IN [{}]", field, list));
-        }
-        for (field, values) in &builder.where_not_ins {
-            if values.is_empty() {
-                continue; // 空 NOT IN 集合 = 无过滤（Collection 语义，与 Algolia 一致）
-            }
-            let list = values.iter().map(Self::filter_value).collect::<Vec<_>>().join(", ");
-            parts.push(format!("{} NOT IN [{}]", field, list));
-        }
-        // `=`/`IS NULL` 只匹配「存在且相等」/「显式 null」，未软删文档从未写入
-        // 该字段，会被全部隐藏；`NOT __soft_deleted = true` 对缺失/false/null
-        // 均匹配，与 Collection 的 as_bool().unwrap_or(false) 语义对齐。
-        match builder.trashed {
-            TrashedFilter::Exclude => parts.push("NOT __soft_deleted = true".to_string()),
-            TrashedFilter::OnlyTrashed => parts.push("__soft_deleted=true".to_string()),
-            TrashedFilter::WithTrashed => {}
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(" AND "))
-        }
-    }
-
-    fn sort_array(builder: &SearchBuilder) -> Value {
-        let parts: Vec<String> = builder
-            .orders
-            .iter()
-            .map(|o| format!("{}:{}", o.field, if o.desc { "desc" } else { "asc" }))
-            .collect();
-        Value::Array(parts.into_iter().map(Value::String).collect())
-    }
-
-    fn page_mode(builder: &SearchBuilder) -> PageMode {
-        let take = builder.take.unwrap_or(10).max(1);
-        let skip = builder.skip.unwrap_or(0);
-        if skip.is_multiple_of(take) {
-            PageMode::Page(skip / take + 1, take)
-        } else {
-            PageMode::Offset(skip, take)
-        }
-    }
-
-    /// `page`/`per_page` → 页模式；page N 与 `(N-1)*per_page` 的偏移等价。
-    fn page_mode_of(page: usize, per_page: usize) -> PageMode {
-        PageMode::Page(page.max(1), per_page.max(1))
-    }
-
-    /// 请求体。按 [`PageMode`] 二选一，理由见那里的注释。
-    fn search_body(builder: &SearchBuilder, mode: &PageMode) -> Value {
-        let mut body = Map::new();
-        body.insert("q".into(), Value::String(builder.query.clone()));
-        if let Some(filter) = Self::build_filter(builder) {
-            body.insert("filter".into(), Value::String(filter));
-        }
-        match *mode {
-            PageMode::Page(page, per_page) => {
-                body.insert("page".into(), Value::from(page));
-                body.insert("hitsPerPage".into(), Value::from(per_page));
-            }
-            PageMode::Offset(offset, limit) => {
-                body.insert("offset".into(), Value::from(offset));
-                body.insert("limit".into(), Value::from(limit));
-            }
-        }
-        if !builder.orders.is_empty() {
-            body.insert("sort".into(), Self::sort_array(builder));
-        }
-        Value::Object(body)
-    }
-
-    /// 文档 → Meilisearch 文档对象；`id` 键统一注入/覆盖为 doc.id。
-    fn doc_to_document(doc: &SearchDocument) -> Value {
-        let mut fields = doc.fields.clone();
-        fields.insert("id".into(), Value::String(doc.id.clone()));
-        Value::Object(fields)
-    }
-
-    /// 响应解析：id 取 `hits[i].id`，source 取整个 hit 对象，total 取 `totalHits`。
+    /// 等待写入类请求的异步任务落地。
     ///
-    /// 用 `offset`/`limit` 搜索时 Meilisearch 只回 `estimatedTotalHits`（穷尽计数
-    /// `totalHits` 需要 `page`/`hitsPerPage`，见 paginate 分支），故回退读它；
-    /// 两者都缺失才回退 hits.len()，避免 total 退化成页大小。
-    fn parse_search_response(raw: &Value) -> SearchResult {
-        let hits = raw.get("hits").and_then(Value::as_array);
-        let total = ["totalHits", "estimatedTotalHits"]
-            .iter()
-            .find_map(|key| raw.get(*key).and_then(Value::as_u64))
-            .map(|n| n as usize)
-            .unwrap_or_else(|| hits.map_or(0, Vec::len));
-        let hits = hits
-            .map(|arr| arr.iter().filter_map(Self::hit_from_response).collect())
-            .unwrap_or_default();
-        SearchResult {
-            hits,
-            total,
-            ..Default::default()
+    /// `POST /documents`、`delete-batch` 都只回 `202 {taskUid, status:"enqueued"}`：
+    /// 请求本身成功了，「一条都没写进去」这类失败（缺主键、字段类型不符）只出现在
+    /// `GET /tasks/{uid}` 的 `"status":"failed"` 上。不读 `taskUid` 就等于把写入
+    /// 失败当成功返回，而且永远没有别的地方能再看到它（`flush` 是 no-op）。
+    /// 官方 SDK 同样是轮询任务直到终态。
+    async fn await_task(&self, response: &Value) -> crate::Result<()> {
+        let Some(uid) = response.get("taskUid").and_then(Value::as_u64) else {
+            return Ok(()); // 旧版 Meilisearch 没有 taskUid：无从确认，按成功处理
+        };
+        let deadline = std::time::Instant::now() + TASK_POLL_TIMEOUT;
+        loop {
+            let task = self
+                .request(reqwest::Method::GET, &format!("/tasks/{uid}"), None)
+                .await?;
+            match task.get("status").and_then(Value::as_str) {
+                Some("succeeded") => return Ok(()),
+                // canceled 同样是「没写进去」，不能算成功
+                Some(status @ ("failed" | "canceled")) => {
+                    let error = task.get("error").map(Value::to_string).unwrap_or_default();
+                    return Err(crate::ScoutError::Backend(format!(
+                        "写入任务 {uid} {status}: {error}"
+                    )));
+                }
+                _ => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                // 超时不静默放行：此时写入结果未知，报错比谎报成功安全
+                return Err(crate::ScoutError::Backend(format!(
+                    "写入任务 {uid} 在 {}s 内未结束，写入结果未知",
+                    TASK_POLL_TIMEOUT.as_secs()
+                )));
+            }
+            tokio::time::sleep(TASK_POLL_INTERVAL).await;
         }
     }
 
-    fn hit_from_response(hit: &Value) -> Option<SearchHit> {
-        let id = hit.get("id")?;
-        let id = id.as_str().map(str::to_string).unwrap_or_else(|| id.to_string());
-        Some(SearchHit {
-            id,
-            // `_rankingScore` 需在索引设置中启用；缺失则无分。`_matchesPosition`
-            // 是位置信息而非分数，忽略。
-            score: hit.get("_rankingScore").and_then(Value::as_f64),
-            source: hit.clone(),
-            highlight: None,
-        })
-    }
 }
 
 impl Engine for MeilisearchEngine {
@@ -240,9 +168,10 @@ impl Engine for MeilisearchEngine {
             crate::validate_index_name(index)?;
             let ids: Vec<Value> = ids.iter().map(|id| Value::String(id.clone())).collect();
             let path = format!("/indexes/{}/documents/delete-batch", percent_encode(index));
-            let _ = self
+            let task = self
                 .request(reqwest::Method::POST, &path, Some(Value::Array(ids)))
                 .await?;
+            self.await_task(&task).await?;
             Ok(())
         })
     }
@@ -264,7 +193,7 @@ impl Engine for MeilisearchEngine {
         let mode = Self::page_mode(builder);
         let want_none = builder.take == Some(0);
         Box::pin(async move {
-            let body = Self::search_body(builder, &mode);
+            let body = Self::search_body(builder, &mode)?;
             let path = format!("/indexes/{}/search", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             let result = Self::parse_search_response(&raw);
@@ -278,6 +207,12 @@ impl Engine for MeilisearchEngine {
         page: usize,
         per_page: usize,
     ) -> EngineFuture<'a, SearchResult> {
+        // 索引名校验同样必须在短路之前：否则 within("_all") 配空 where_in 会返回
+        // Ok(空结果)，与 search 的 InvalidIndexName 不一致——两个入口必须同行为。
+        let index = builder.index.as_deref().unwrap_or("default");
+        if let Err(e) = crate::validate_index_name(index) {
+            return Box::pin(async move { Err(e) });
+        }
         // 空 where_in 集合 = 不匹配任何（Collection 语义）：短路空结果。
         if builder.where_ins.iter().any(|(_, v)| v.is_empty()) {
             return Box::pin(async move { Ok(SearchResult::default()) });
@@ -287,9 +222,7 @@ impl Engine for MeilisearchEngine {
         // paginate 天然页对齐：走 Page 模式，total 是穷尽的 totalHits
         let mode = Self::page_mode_of(page, per_page);
         Box::pin(async move {
-            let index = builder.index.as_deref().unwrap_or("default");
-            crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, &mode);
+            let body = Self::search_body(builder, &mode)?;
             let path = format!("/indexes/{}/search", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             Ok(Self::parse_search_response(&raw))
@@ -383,9 +316,10 @@ impl Engine for MeilisearchEngine {
             for (index, docs) in groups {
                 crate::validate_index_name(index)?;
                 let path = format!("/indexes/{}/documents?primaryKey=id", percent_encode(index));
-                let _ = self
+                let task = self
                     .request(reqwest::Method::POST, &path, Some(Value::Array(docs)))
                     .await?;
+                self.await_task(&task).await?;
             }
             Ok(())
         })
@@ -422,7 +356,11 @@ impl Engine for MeilisearchEngine {
                 fields.insert("__soft_deleted".into(), Value::Bool(true));
                 let doc = SearchDocument {
                     id: id.clone(),
-                    index: None,
+                    // 必须显式带上索引：update_bulk 按 doc.index 分组，缺省是
+                    // `default`。之前这里写 None —— 搜的是 `index`，写回却落在
+                    // default：目标索引里的文档根本没被标软删（依旧可搜到），
+                    // 同时给 default 塞了个幽灵副本、覆盖掉那儿的同 id 文档。
+                    index: Some(index.to_string()),
                     fields,
                 };
                 self.update(std::slice::from_ref(&doc)).await?;
@@ -434,183 +372,5 @@ impl Engine for MeilisearchEngine {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::SearchBuilder;
-
-    #[test]
-    fn filter_equality_and_in_clauses() {
-        let builder = SearchBuilder::new("")
-            .where_field("title", "a\"b\\c")
-            .where_field("count", 5)
-            .where_field("active", true)
-            .where_in("tag", ["x", "y"])
-            .where_not_in("tag", ["z"]);
-        let filter = MeilisearchEngine::build_filter(&builder).unwrap();
-        assert_eq!(
-            filter,
-            r#"title="a\"b\\c" AND count=5 AND active=true AND tag IN ["x", "y"] AND tag NOT IN ["z"] AND NOT __soft_deleted = true"#
-        );
-    }
-
-    #[test]
-    fn filter_trashed_variants() {
-        assert_eq!(
-            MeilisearchEngine::build_filter(&SearchBuilder::new("")).unwrap(),
-            "NOT __soft_deleted = true"
-        );
-        assert_eq!(
-            MeilisearchEngine::build_filter(&SearchBuilder::new("").only_trashed()).unwrap(),
-            "__soft_deleted=true"
-        );
-        assert_eq!(
-            MeilisearchEngine::build_filter(&SearchBuilder::new("").with_trashed()),
-            None
-        );
-    }
-
-
-
-
-    #[test]
-    fn page_mode_prefers_page_when_offset_is_page_aligned() {
-        // 关键回归：Meilisearch 只在 page/hitsPerPage 模式下返回**穷尽**的 totalHits；
-        // offset/limit 模式只给 estimatedTotalHits（受 maxTotalHits 封顶，默认 1000）。
-        // 全用 offset 会让 total 变成估算值，与其余七个驱动不一致。
-        let aligned = SearchBuilder::new("q").take(10).skip(20);
-        assert!(
-            matches!(
-                MeilisearchEngine::page_mode(&aligned),
-                PageMode::Page(3, 10)
-            ),
-            "skip 是 take 的整数倍时必须走页模式（穷尽计数）"
-        );
-        // 页对不齐才退回 offset —— 页模式会丢掉 15 % 10 的余数
-        let unaligned = SearchBuilder::new("q").take(10).skip(15);
-        assert!(matches!(
-            MeilisearchEngine::page_mode(&unaligned),
-            PageMode::Offset(15, 10)
-        ));
-        // 无 skip 时页对齐（offset 0）
-        assert!(matches!(
-            MeilisearchEngine::page_mode(&SearchBuilder::new("q")),
-            PageMode::Page(1, 10)
-        ));
-    }
-
-    #[test]
-    fn search_body_emits_exactly_one_paging_mode() {
-        // 两种模式互斥：Meilisearch 拒绝 offset 与 page 同时出现
-        let b = SearchBuilder::new("q");
-        let paged = MeilisearchEngine::search_body(&b, &PageMode::Page(2, 10));
-        assert!(paged.get("page").is_some() && paged.get("offset").is_none());
-        let offset = MeilisearchEngine::search_body(&b, &PageMode::Offset(15, 10));
-        assert!(offset.get("offset").is_some() && offset.get("page").is_none());
-    }
-
-    #[test]
-    fn search_body_includes_filter_when_trashed_excludes() {
-        let builder = SearchBuilder::new("x").where_field("cat", 1);
-        let body = MeilisearchEngine::search_body(&builder, &MeilisearchEngine::page_mode_of(1, 10));
-        assert_eq!(
-            body["filter"],
-            "cat=1 AND NOT __soft_deleted = true"
-        );
-    }
-
-    #[test]
-    fn parse_response_reads_estimated_total_hits() {
-        // 回归：offset/limit 搜索只回 estimatedTotalHits，读到它之前 total 会
-        // 退化成 hits.len()（页大小），分页 UI 的「共 N 条」就错了。
-        let raw = serde_json::json!({"hits": [{"id": "1"}], "estimatedTotalHits": 471});
-        let result = MeilisearchEngine::parse_search_response(&raw);
-        assert_eq!(result.total, 471);
-        assert_eq!(result.hits.len(), 1);
-        // page/hitsPerPage 模式仍回 totalHits（穷尽计数），优先读它。
-        let page_mode = serde_json::json!({
-            "hits": [{"id": "1"}],
-            "totalHits": 42,
-            "estimatedTotalHits": 471
-        });
-        assert_eq!(MeilisearchEngine::parse_search_response(&page_mode).total, 42);
-    }
-
-    #[test]
-    fn parse_response_extracts_hits_total_score() {
-        let raw = serde_json::json!({
-            "hits": [
-                {"id": "1", "title": "a", "_rankingScore": 0.9},
-                {"id": 2, "title": "b"}
-            ],
-            "totalHits": 42
-        });
-        let result = MeilisearchEngine::parse_search_response(&raw);
-        assert_eq!(result.total, 42);
-        assert_eq!(result.hits.len(), 2);
-        assert_eq!(result.hits[0].id, "1");
-        assert_eq!(result.hits[0].score, Some(0.9));
-        assert_eq!(result.hits[0].source["title"], "a");
-        assert_eq!(result.hits[1].id, "2"); // 数字 id 也转字符串
-        assert_eq!(result.hits[1].score, None);
-    }
-
-    #[test]
-    fn parse_response_total_falls_back_to_hits_len() {
-        let raw = serde_json::json!({"hits": [{"id": "1"}]});
-        assert_eq!(MeilisearchEngine::parse_search_response(&raw).total, 1);
-        let empty = MeilisearchEngine::parse_search_response(&serde_json::json!({}));
-        assert_eq!(empty.total, 0);
-        assert!(empty.hits.is_empty());
-    }
-
-    #[tokio::test]
-    async fn flush_is_a_noop_and_makes_no_request() {
-        // 指向必然连不上的地址：真的打网络就会失败，返回 Ok 即证明没有请求。
-        // flush 的契约是「刷新可见性」，绝不能是清空索引——README 的生命周期示例
-        // 在 update 与 search 之间调用它，而这里曾打 delete-all 把索引删空。
-        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
-        engine.flush("books").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn index_less_soft_delete_is_refused_not_silently_skipped() {
-        // 曾经它硬编码 default：对写在别的索引里的文档静默跳过却返回 Ok。
-        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
-        let err = engine
-            .soft_delete(&["b1".to_string()])
-            .await
-            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
-        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
-    }
-
-
-    #[tokio::test]
-    async fn empty_where_in_short_circuits_search_and_paginate() {
-        // 回归：空 where_in 集合 = 不匹配任何（Collection 语义），曾被拼成
-        // `tag IN []` 丢给后端（行为由后端决定：报错或匹配全部）。
-        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
-        let builder = SearchBuilder::new("")
-            .within("books")
-            .where_in("tag", Vec::<&str>::new());
-        let result = engine.search(&builder).await.unwrap();
-        assert!(result.hits.is_empty());
-        assert_eq!(result.total, 0);
-        // paginate 走同一条短路，不能只在 search 上修。
-        let paged = engine.paginate(&builder, 2, 10).await.unwrap();
-        assert!(paged.hits.is_empty());
-        assert_eq!(paged.total, 0);
-    }
-
-    #[tokio::test]
-    async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
-        // 回归：空 where_in 的短路原先排在 validate_index_name 之前，
-        // within("_all") 会因此返回 Ok(空结果) 而不是 InvalidIndexName。
-        let engine = MeilisearchEngine::new("http://127.0.0.1:1".to_string(), None);
-        let err = engine
-            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
-    }
-
-}
+#[path = "meilisearch_engine_tests.rs"]
+mod tests;

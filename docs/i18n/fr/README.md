@@ -38,7 +38,7 @@ let result = engine.search(
 | 🗑️ Suppression logique | `soft_delete_in(index, ids)` pose `__soft_deleted` ; filtrage à trois états `with_trashed()` / `only_trashed()` |
 | 📦 Opérations en lot | `update_bulk` / `delete_bulk` réduisent les allers-retours ; `delete_in` cible un index précis |
 | 🔌 Pilotes enfichables | Mémoire sans dépendance par défaut ; 8 backends chacun derrière sa feature — l'inutilisé ne se compile pas |
-| 🔒 Limite de sécurité | Validation du nom d'index (`validate_index_name`) + encodage pourcent RFC 3986, contre l'injection de chemin |
+| 🔒 Limite de sécurité | Validation du nom d'index, du nom de champ et de l'hôte (`validate_index_name` / `validate_field_name` / `validate_host`) + encodage pourcent RFC 3986, contre l'injection de chemin |
 | 🤖 Animal de compagnie | Scout le robot de recherche : bannière de terminal + aide au diagnostic par erreur (`rust_scout::pet`) |
 
 ## Architecture
@@ -82,7 +82,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter : requêtes chaînées
 │   ├── document.rs         # SearchDocument : le document écrit (contrat serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit : résultats de requête
-│   ├── searchable.rs       # Searchable / SearchableStore : pont vers les modèles métier
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # animal de compagnie : Scout le robot de recherche (bannière + aides)
 │   │
@@ -111,7 +110,9 @@ rust-scout/
 ```
 
 > Le tag `[feature]` indique la feature Cargo requise par un pilote. Si elle est désactivée,
-> `EngineManager` renvoie `ScoutError::Unsupported` au lieu de dégrader silencieusement.
+> `EngineManager` renvoie `ScoutError::Unsupported` au lieu de dégrader silencieusement. Un
+> `driver` inconnu (faute de frappe, espace final, casse incorrecte comme `OpenSearch`) est
+> également une erreur — auparavant il retombait en silence sur le pilote mémoire.
 
 ### Différences de capacités entre pilotes
 
@@ -124,8 +125,12 @@ résultats faux :
 | Algolia | Le tri exige des index répliqués construits à l'avance ; impossible à choisir par requête | `order_by` est **ignoré** (les résultats arrivent, seul l'ordre reste indéterminé) |
 | XunSearch | Aucune commande de protocole pour `where_in` / `where_not_in` | renvoie `Unsupported` ; utilisez `where_field` |
 | XunSearch | Le serveur ne gère qu'un seul champ de tri | plusieurs `order_by` renvoient `Unsupported` |
-| XunSearch | Suppression logique non implémentée | `soft_delete` / `only_trashed` renvoient `Unsupported` |
+| XunSearch | Suppression logique non implémentée | `soft_delete` / `soft_delete_in` / `only_trashed` renvoient `Unsupported` |
 | XunSearch | Créer un index exige un ini de schéma de champs | `create_index` renvoie `Unsupported` (passez un ini à `XunSearchEngine::new`) |
+| Typesense | Un `q` non vide exige `query_by` | sans `.option("query_by", "champ1,champ2")` le backend répond 400 `Parameter \`query_by\` is required` ; le pilote ne devine aucun champ (un mauvais choix changerait l'ordre en silence) |
+| Meilisearch / Algolia | Les écritures passent par une tâche (task) du backend | `update` / `update_bulk` / `delete` / `delete_in` interrogent l'endpoint des tâches jusqu'à l'état final (plafond de 30 s) et renvoient une erreur si la tâche échoue ; l'écriture en lot devient plus lente, mais plus rien n'est perdu en silence |
+| database | `reindex` **déplace** au lieu de copier | l'index source est vidé (`id` est la clé primaire globale, un même id ne peut pas exister dans deux index) ; si vous devez garder la source, n'utilisez pas le pilote database |
+| XunSearch | `index: None` désigne désormais l'index nommé `default` | comme pour les sept autres pilotes ; auparavant cela retombait sur la base par défaut du serveur xunsearchd (`db`) — les données écrites avec `index: None` ne se retrouvent qu'avec `index("db")` |
 | Taille de page par défaut | Sans `take`, collection / database renvoient **tous** les hits | les six autres pilotes renvoient **10** par défaut (plafond habituel de leur backend) |
 
 Deux alignements sémantiques délibérés :
@@ -229,7 +234,7 @@ engine.update_bulk(&docs).await?;                              // écriture en l
 engine.flush("books").await?;                                  // rafraîchir la visibilité
 engine.search(&builder).await?;                                // requête
 engine.delete_in("books", &["book-1".to_string()]).await?;     // supprimer les docs d'un index
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // suppression logique (marquage)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // suppression logique (marquage ; XunSearch : Unsupported)
 engine.reindex("books", "books_v2").await?;                    // reconstruire un index
 engine.delete_index("books").await?;                           // supprimer l'index
 ```
@@ -238,9 +243,10 @@ engine.delete_index("books").await?;                           // supprimer l'in
 > mémoire supprime dans tous les index ; ES ne touche que `default`). Utilisez `delete_in` pour
 > cibler un index précis.
 >
-> Même chose pour la suppression logique : **`soft_delete_in(index, ids)` est la variante
-> fiable quel que soit le moteur**. Le `soft_delete` sans index ne peut marquer dans tous
-> les index que sur les pilotes synchrones (`collection` / `database`) ; les pilotes HTTP
+> Même chose pour la suppression logique : `soft_delete_in(index, ids)` est la voie fiable
+> chez sept des huit moteurs — **XunSearch n'implémente ni `soft_delete` ni `soft_delete_in`**,
+> les deux renvoient `ScoutError::Unsupported`. Le `soft_delete` sans index ne peut marquer dans
+> tous les index que sur les pilotes synchrones (`collection` / `database`) ; les pilotes HTTP
 > ne le peuvent pas et renvoient `ScoutError::Unsupported` (au lieu de ne rien faire en silence).
 >
 > `flush` a pour contrat de rafraîchir la visibilité des écritures : **aucun pilote ne
@@ -323,7 +329,9 @@ Toutes les opérations renvoient `crate::Result<T>`, les erreurs convergeant ver
 
 | Variante | Déclencheur | feature |
 |------|----------|---------|
-| `InvalidIndexName` | nom d'index avec espace / `/` / `\`, commençant par `.`, ou vide (validé avant écriture) | intégré |
+| `InvalidIndexName` | nom d'index avec espace / `/` / `\` / `"` / `'` / `;` / `` ` ``, vide, commençant par `.` / `-` / `_`, ou contenant un caractère générique / multi-index (`*` `?` `,` `+`) — validé avant écriture | intégré |
+| `InvalidHost` | l'hôte contient des identifiants intégrés (`http://user:pass@host`) ; l'hôte n'est pas réaffiché dans le message | intégré |
+| `InvalidFieldName` | un champ de filtre ou de tri contient des espaces ou des caractères d'opérateur ; seuls lettres, chiffres, `_`, `-` et `.` sont acceptés | intégré |
 | `InvalidResult` | le champ d'un document n'est pas un objet JSON | intégré |
 | `Unsupported` | feature du pilote désactivée, config requise manquante, ou opération non gérée par le moteur | intégré |
 | `Json` | erreur de sérialisation / désérialisation serde | intégré |
@@ -334,22 +342,19 @@ Toutes les opérations renvoient `crate::Result<T>`, les erreurs convergeant ver
 
 Chaque variante porte une aide au diagnostic — voir [`ScoutError::pet_hint()`](#animal-de-compagnie).
 
-### Pont vers les modèles métier (Searchable)
-
-Implémentez `Searchable` pour mapper une structure métier en document indexable, et `SearchableStore` pour encapsuler les trois opérations `index_documents` / `remove_documents` / `search` :
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **Limite de sécurité.** Les hôtes contenant des identifiants (`http://user:pass@host`) sont
+> refusés (`InvalidHost`) — le `Display` d'une erreur reqwest y ajoute l'URL complète, un seul
+> échec enverrait donc le mot de passe dans les logs. Les redirections ne sont suivies que
+> **same-origin** (même scheme, même hôte, même port), car reqwest ne retire que les en-têtes
+> d'authentification standard lors d'un changement d'hôte et `X-TYPESENSE-API-KEY` /
+> `X-Algolia-API-Key` partiraient vers un hôte étranger. Conséquence habituelle : un POST
+> redirigé peut arriver en GET et sans corps (RFC 7231), un reverse proxy qui redirige les
+> chemins d'écriture n'est donc pas transparent. Les noms de champs de filtre et de tri passent
+> par `validate_field_name` (lettres, chiffres, `_`, `-` et `.` uniquement ; `author.name` et
+> les caractères non ASCII restent acceptés). Enfin, le `Debug` de `ScoutConfig` masque les
+> secrets (`*.api_key` / `*secret*` / `*password*` / `*token` deviennent `"<redacted>"`), alors
+> que `Serialize` les écrit toujours tels quels — pour logger, utilisez `{:?}`, jamais
+> `serde_json::to_string`.
 
 ## Animal de compagnie
 
@@ -422,8 +427,8 @@ Si ce projet vous aide, un don est le bienvenu ☕ — votre soutien est le mote
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="Don par WeChat" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="Don par Alipay" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="Don par WeChat" width="130"/>
+<img src="../../../docs/alipay.png" alt="Don par Alipay" width="130"/>
 
 Scannez avec WeChat · Scannez avec Alipay
 
@@ -431,16 +436,16 @@ Scannez avec WeChat · Scannez avec Alipay
 
 | Réseau | Adresse du portefeuille | QR code |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### Virements internationaux (virement bancaire)
 

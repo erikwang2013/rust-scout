@@ -62,7 +62,13 @@ pub fn banner() -> String {
 pub fn hint(err: &ScoutError) -> &'static str {
     match err {
         ScoutError::InvalidIndexName(_) => {
-            "索引名里有空白、斜杠，或者以点开头 —— 这个槽位对不上，换一个名字试试？"
+            "索引名里有空白、斜杠、通配符，或者以 `.` `-` `_` 开头 —— 这个槽位对不上，换一个名字试试？"
+        }
+        ScoutError::InvalidHost(_) => {
+            "host 里塞了 `user:pass@` —— 凭据别放 URL，请求一出错它就会跟着错误信息进日志。"
+        }
+        ScoutError::InvalidFieldName(_) => {
+            "字段名里有空格或运算符字符 —— 过滤表达式会被它改写成另一条查询，换个字段名。"
         }
         ScoutError::InvalidResult(_) => "文档字段得是 JSON 对象。我读到的是别的东西。",
         ScoutError::Unsupported(_) => {
@@ -123,6 +129,8 @@ mod tests {
     fn hint_covers_every_error_variant() {
         let cases = [
             ScoutError::InvalidIndexName("a/b".into()),
+            ScoutError::InvalidHost("userinfo".into()),
+            ScoutError::InvalidFieldName("x:=1 || y".into()),
             ScoutError::InvalidResult("not an object".into()),
             ScoutError::Unsupported("no feature".into()),
             ScoutError::Json(serde_json::from_str::<i32>("x").unwrap_err()),

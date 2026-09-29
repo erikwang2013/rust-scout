@@ -91,7 +91,6 @@ mod tests {
         let result = engine.search(&SearchBuilder::new("anything")).await.unwrap();
         assert_eq!(result.total, 0);
         assert!(result.hits.is_empty());
-        assert!(engine.map_ids(&result).is_empty());
 
         let paginated = engine
             .paginate(&SearchBuilder::new("x"), 1, 10)

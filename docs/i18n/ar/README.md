@@ -38,7 +38,7 @@ let result = engine.search(
 | 🗑️ الحذف الناعم | يضع `soft_delete_in(index, ids)` علامة `__soft_deleted`؛ وتصفية ثلاثية الحالات عبر `with_trashed()` / `only_trashed()` |
 | 📦 عمليات مجمّعة | `update_bulk` / `delete_bulk` تقلّلان الرحلات ذهابًا وإيابًا؛ و`delete_in` يستهدف فهرسًا واحدًا بدقة |
 | 🔌 محركات قابلة للتبديل | الافتراضي بلا اعتماديات؛ و8 خلفيات كل واحدة خلف ميزة خاصة بها، فما لا تستخدمه لا يُصرَّف |
-| 🔒 حدود الأمان | التحقق من اسم الفهرس (`validate_index_name`) + ترميز النسبة المئوية وفق RFC 3986 لمنع حقن المسارات |
+| 🔒 حدود الأمان | التحقق من اسم الفهرس واسم الحقل والـ host (`validate_index_name` / `validate_field_name` / `validate_host`) + ترميز النسبة المئوية وفق RFC 3986 لمنع حقن المسارات |
 | 🤖 حيوان المشروع الأليف | روبوت البحث Scout: شعار الطرفية + تلميح تشخيصي لكل خطأ (`rust_scout::pet`) |
 
 ## تصميم البنية
@@ -81,7 +81,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: الاستعلامات المتسلسلة
 │   ├── document.rs         # SearchDocument: المستند المكتوب (عقد serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: نتائج الاستعلام
-│   ├── searchable.rs       # Searchable / SearchableStore: جسر نماذج العمل
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # حيوان المشروع الأليف: روبوت البحث Scout (الشعار + تلميحات الأخطاء)
 │   │
@@ -110,7 +109,9 @@ rust-scout/
 ```
 
 > تشير `[feature]` إلى ميزة Cargo التي يحتاجها ذلك المحرك. وعندما تكون غير مفعّلة،
-> يعيد `EngineManager` الخطأ `ScoutError::Unsupported` بدلًا من التدهور الصامت.
+> يعيد `EngineManager` الخطأ `ScoutError::Unsupported` بدلًا من التدهور الصامت. وسلسلة
+> `driver` مجهولة (خطأ مطبعي، أو مسافة زائدة، أو حالة أحرف خاطئة مثل `OpenSearch`) هي
+> خطأ أيضًا — كانت سابقًا تسقط بصمت إلى محرك الذاكرة.
 
 ### فروق قدرات المحركات
 
@@ -122,8 +123,12 @@ rust-scout/
 | Algolia | الترتيب يتطلّب فهارس نسخ (replica) مُعدّة سلفًا؛ ولا يمكن اختياره لكل استعلام | `order_by` **متجاهَل** (النتائج تُعاد رغم ذلك، لكن الترتيب غير محدَّد) |
 | XunSearch | `where_in` / `where_not_in`: لا يوجد أمر بروتوكول لهما | يعيد `Unsupported`؛ استخدم `where_field` |
 | XunSearch | الخادم يدعم حقل ترتيب واحدًا فقط | استخدام عدة `order_by` يعيد `Unsupported` |
-| XunSearch | الحذف الناعم غير مُنفَّذ | `soft_delete` / `only_trashed` يعيدان `Unsupported` |
+| XunSearch | الحذف الناعم غير مُنفَّذ | `soft_delete` / `soft_delete_in` / `only_trashed` تُعيد `Unsupported` |
 | XunSearch | إنشاء فهرس يحتاج ملف ini لمخطط الحقول | `create_index` يعيد `Unsupported` (مرّر ملف ini إلى `XunSearchEngine::new`) |
+| Typesense | الـ `q` غير الفارغ يتطلّب `query_by` | بدون `.option("query_by", "field1,field2")` ترد الخلفية بـ 400 `Parameter \`query_by\` is required`؛ ولا يخمّن المحرك حقلًا بدلًا عنك (التخمين الخاطئ يغيّر الترتيب بصمت) |
+| Meilisearch / Algolia | الكتابة تمرّ عبر مهمة (task) في الخلفية | `update` / `update_bulk` / `delete` / `delete_in` تستعلم نقطة المهام حتى الحالة النهائية (بسقف 30 ثانية)، وتعيد خطأً إذا فشلت المهمة؛ لذا صارت الكتابة المجمّعة أبطأ، مقابل ألّا تُفقد بيانات بصمت |
+| database | `reindex` **ينقل** ولا ينسخ | فهرس المصدر يُفرَّغ (`id` هو المفتاح الأساسي العام، ولا يمكن أن يوجد المعرّف نفسه في فهرسين)؛ من يريد الإبقاء على المصدر فليتجنّب محرك database |
+| XunSearch | صار `index: None` يعني الفهرس المسمّى `default` | مثل باقي المحركات السبعة؛ كان سابقًا يهبط إلى قاعدة البيانات الافتراضية `db` في خادم xunsearchd — والبيانات المكتوبة بـ `index: None` لا تُوجد إلا عبر `index("db")` |
 | العدد الافتراضي للنتائج | بدون تمرير `take` يعيد collection / database **كل** النتائج المطابقة | باقي المحركات الستة تعيد **10** افتراضيًا (الحد المعتاد في خلفياتها) |
 
 مواءمتان دلاليتان مقصودتان:
@@ -228,7 +233,7 @@ engine.update_bulk(&docs).await?;                              // كتابة م�
 engine.flush("books").await?;                                  // تحديث الظهور
 engine.search(&builder).await?;                                // استعلام
 engine.delete_in("books", &["book-1".to_string()]).await?;     // حذف مستندات من فهرس واحد
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // حذف ناعم (وضع علامة)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // حذف ناعم (وضع علامة؛ XunSearch: Unsupported)
 engine.reindex("books", "books_v2").await?;                    // إعادة بناء الفهرس
 engine.delete_index("books").await?;                           // حذف الفهرس
 ```
@@ -237,10 +242,11 @@ engine.delete_index("books").await?;                           // حذف الف�
 > يحذف عبر كل الفهارس، بينما ES يمسّ `default` فقط). لاستهداف فهرس واحد بدقة
 > استخدم `delete_in`.
 >
-> وينطبق الأمر نفسه على الحذف الناعم: **`soft_delete_in(index, ids)` هو الموثوق عبر كل المحركات**.
-> أما `soft_delete` بدون فهرس فلا يستطيع وضع العلامة عبر الفهارس إلا على خلفية متزامنة
-> (`collection` / `database`)؛ أما خلفيات HTTP فلا تستطيع ذلك وتعيد `ScoutError::Unsupported`
-> (بدلًا من ألّا تفعل شيئًا بصمت).
+> وينطبق الأمر نفسه على الحذف الناعم: `soft_delete_in(index, ids)` هو المدخل الموثوق لدى سبعة
+> من المحركات الثمانية — أما **XunSearch فلا تُنفِّذ أيًّا من `soft_delete` و`soft_delete_in`**،
+> وكلاهما يعيد `ScoutError::Unsupported`. أما `soft_delete` بدون فهرس فلا يستطيع وضع العلامة
+> عبر الفهارس إلا على خلفية متزامنة (`collection` / `database`)؛ أما خلفيات HTTP فلا تستطيع ذلك
+> وتعيد `ScoutError::Unsupported` (بدلًا من ألّا تفعل شيئًا بصمت).
 >
 > عقد `flush` هو تحديث ظهور الكتابات — **ولا يقوم أي محرك بإفراغ الفهرس**: ES يرسل
 > `_refresh`، وXunSearch يرسل `CMD_INDEX_COMMIT`، وبقية المحركات تكون كتاباتها ظاهرة فورًا،
@@ -322,7 +328,9 @@ let engine = EngineManager::new(config).engine()?;
 
 | المتغيّر | متى يحدث | feature |
 |------|----------|---------|
-| `InvalidIndexName` | اسم الفهرس يحتوي على مسافة أو `/` أو `\`، أو يبدأ بـ `.`، أو فارغ (يُتحقق منه قبل الكتابة) | مدمج |
+| `InvalidIndexName` | اسم الفهرس يحتوي على مسافة أو `/` أو `\` أو `"` أو `'` أو `;` أو `` ` ``، أو أنه فارغ، أو يبدأ بـ `.` أو `-` أو `_`، أو يحتوي على محرف بديل / متعدد الفهارس (`*` `?` `,` `+`) — يُتحقق منه قبل الكتابة | مدمج |
+| `InvalidHost` | يحتوي الـ host على بيانات دخول مضمّنة (`http://user:pass@host`)؛ ولا يُعاد إظهار الـ host في رسالة الخطأ | مدمج |
+| `InvalidFieldName` | اسم حقل التصفية أو الترتيب يحتوي على مسافة أو محرف عملية؛ المسموح الحروف والأرقام و`_` و`-` و`.` فقط | مدمج |
 | `InvalidResult` | حقل المستند ليس كائن JSON | مدمج |
 | `Unsupported` | ميزة المحرك غير مفعّلة، أو إعداد مطلوب ناقص، أو المحرك لا يدعم العملية | مدمج |
 | `Json` | خطأ في التسلسل / فك التسلسل عبر serde | مدمج |
@@ -333,23 +341,17 @@ let engine = EngineManager::new(config).engine()?;
 
 ويحمل كل متغيّر تلميحًا تشخيصيًا، انظر [`ScoutError::pet_hint()`](#حيوان-المشروع-الأليف).
 
-### ربط نماذج العمل (Searchable)
-
-نفّذ `Searchable` لتحويل بنيتك البرمجية إلى مستند قابل للفهرسة، ونفّذ `SearchableStore`
-لتغليف العمليات الثلاث `index_documents` / `remove_documents` / `search`:
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **حدود الأمان.** تُرفض العناوين التي تحمل بيانات دخول مضمّنة (`http://user:pass@host`) بالخطأ
+> `InvalidHost` — لأن `Display` في reqwest يلحق الرابط كاملًا، فتكفي محاولة فاشلة واحدة ليصل
+> كلمة المرور إلى السجل. ولا تُتبَّع إعادة التوجيه إلا **داخل الأصل نفسه** (نفس scheme وhost
+> وport)، لأن reqwest يحذف الترويسات القياسية فقط عند تغيير الـ host، بينما
+> `X-TYPESENSE-API-KEY` / `X-Algolia-API-Key` ترويسات مخصّصة وستُرسل إلى host غريب. ومن
+> النتائج المعروفة لذلك: طلب POST مُعاد توجيهه قد يصل كـ GET بلا جسم (RFC 7231)، لذا لا يكون
+> الوسيط العكسي (reverse proxy) الذي يعيد توجيه مسارات الكتابة شفافًا. كما تمرّ أسماء حقول
+> التصفية والترتيب عبر `validate_field_name` (الحروف والأرقام و`_` و`-` و`.` فقط؛ ويبقى
+> `author.name` والمحارف غير اللاتينية مسموحة). وأخيرًا، يُخفي `Debug` في `ScoutConfig`
+> الأسرار (`*.api_key` / `*secret*` / `*password*` / `*token` تصبح `"<redacted>"`)، بينما
+> يظل `Serialize` يكتبها كما هي — فاستخدم `{:?}` في السجلات، ولا تستخدم `serde_json::to_string`.
 
 ## حيوان المشروع الأليف
 
@@ -421,8 +423,8 @@ eprintln!("{}", pet::format_error(&err));
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="تبرع عبر WeChat" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="تبرع عبر Alipay" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="تبرع عبر WeChat" width="130"/>
+<img src="../../../docs/alipay.png" alt="تبرع عبر Alipay" width="130"/>
 
 امسح عبر WeChat · امسح عبر Alipay
 
@@ -430,16 +432,16 @@ eprintln!("{}", pet::format_error(&err));
 
 | الشبكة | عنوان المحفظة | رمز QR |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### التحويلات الدولية (حوالة بنكية)
 

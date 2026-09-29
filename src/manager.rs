@@ -147,13 +147,21 @@ fn build_engine(config: &ScoutConfig) -> crate::Result<Arc<dyn Engine>> {
                 &host, &project, None,
             )))
         }
+        "collection" => Ok(Arc::new(CollectionEngine::new())),
         other => {
             if feature_missing(other) {
                 return Err(crate::ScoutError::Unsupported(format!(
                     "engine driver `{other}` requires its feature to be enabled"
                 )));
             }
-            Ok(Arc::new(CollectionEngine::new()))
+            // 以前这里默默回退到 CollectionEngine：`driver` 拼错、多了个尾空格、
+            // 或者大小写不对（`OpenSearch`），应用照跑不误 —— 只是不落盘、结果也和
+            // 配的后端不一样。配错就该在启动时炸，而不是等哪天发现搜索对不上。
+            Err(crate::ScoutError::Unsupported(format!(
+                "unknown engine driver `{other}`; known drivers: \
+                 collection, elasticsearch, opensearch, meilisearch, \
+                 typesense, algolia, database, null, xunsearch"
+            )))
         }
     }
 }
@@ -191,6 +199,37 @@ mod tests {
         let a = manager.engine().unwrap();
         let b = manager.engine().unwrap();
         assert!(Arc::ptr_eq(&a, &b));
+    }
+
+    #[test]
+    fn unknown_driver_is_an_error_not_a_silent_collection_fallback() {
+        // 配错 driver 以前会拿到一个内存引擎：跑得起来、不落盘、结果和配的后端不一样。
+        for bad in [
+            "OpenSearch",
+            "meilisearch ",
+            "meilisarch",
+            "elastic-search",
+            "",
+        ] {
+            let config = ScoutConfig {
+                driver: bad.to_string(),
+                ..ScoutConfig::default()
+            };
+            // 不能 unwrap_err()：`Arc<dyn Engine>` 不是 Debug，unwrap_err 要 T: Debug。
+            match EngineManager::new(config).engine() {
+                Err(err) => assert!(
+                    matches!(err, crate::ScoutError::Unsupported(_)),
+                    "driver {bad:?} should be rejected, got {err:?}"
+                ),
+                Ok(_) => panic!("driver {bad:?} silently produced an engine"),
+            }
+        }
+    }
+
+    #[test]
+    fn collection_driver_still_builds() {
+        // 显式分支别把正常入口堵掉。
+        assert!(EngineManager::new(ScoutConfig::collection()).engine().is_ok());
     }
 
     #[tokio::test]

@@ -38,7 +38,7 @@ let result = engine.search(
 | 🗑️ सॉफ़्ट डिलीट | `soft_delete_in(index, ids)` द्वारा `__soft_deleted` चिह्न; `with_trashed()` / `only_trashed()` तीन-अवस्था फ़िल्टरिंग |
 | 📦 बल्क ऑपरेशन | `update_bulk` / `delete_bulk` से राउंड-ट्रिप कम; `delete_in` किसी एक इंडेक्स पर सटीक |
 | 🔌 प्लग करने योग्य ड्राइवर | डिफ़ॉल्ट शून्य-निर्भरता; 8 बैकएंड, हर एक अपने feature द्वारा गेटेड — जो उपयोग नहीं होता वह कंपाइल नहीं होता |
-| 🔒 सुरक्षा सीमा | इंडेक्स नाम सत्यापन (`validate_index_name`) + RFC 3986 प्रतिशत-एन्कोडिंग, पाथ इंजेक्शन रोकने के लिए |
+| 🔒 सुरक्षा सीमा | इंडेक्स नाम, फ़ील्ड नाम और होस्ट का सत्यापन (`validate_index_name` / `validate_field_name` / `validate_host`) + RFC 3986 प्रतिशत-एन्कोडिंग, पाथ इंजेक्शन रोकने के लिए |
 | 🤖 प्रोजेक्ट पेट | सर्च रोबोट Scout: टर्मिनल बैनर + हर त्रुटि के लिए निदान संकेत (`rust_scout::pet`) |
 
 ## वास्तुकला डिज़ाइन
@@ -81,7 +81,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: चेन-आधारित क्वेरी
 │   ├── document.rs         # SearchDocument: लिखा जाने वाला दस्तावेज़ (serde JSON कॉन्ट्रैक्ट)
 │   ├── result.rs           # SearchResult / SearchHit: क्वेरी परिणाम
-│   ├── searchable.rs       # Searchable / SearchableStore: बिज़नेस मॉडल ब्रिज
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # प्रोजेक्ट पेट: सर्च रोबोट Scout (बैनर + त्रुटि संकेत)
 │   │
@@ -110,7 +109,9 @@ rust-scout/
 ```
 
 > `[feature]` उस Cargo feature को दर्शाता है जो उस ड्राइवर के लिए आवश्यक है। सक्रिय न होने पर
-> `EngineManager` चुपचाप घटने के बजाय `ScoutError::Unsupported` लौटाता है।
+> `EngineManager` चुपचाप घटने के बजाय `ScoutError::Unsupported` लौटाता है। अनजाना `driver`
+> स्ट्रिंग (टाइपो, आख़िर में ज़्यादा स्पेस, या `OpenSearch` जैसी ग़लत केस) भी त्रुटि है —
+> पहले वह चुपचाप इन-मेमोरी ड्राइवर पर गिर जाता था।
 
 ### ड्राइवर क्षमता अंतर
 
@@ -122,8 +123,12 @@ rust-scout/
 | Algolia | सॉर्टिंग के लिए पहले से बने रेप्लिका इंडेक्स चाहिए; इसे हर क्वेरी के लिए चुना नहीं जा सकता | `order_by` **अनदेखा** किया जाता है (परिणाम फिर भी आते हैं, बस क्रम अनिर्दिष्ट रहता है) |
 | XunSearch | `where_in` / `where_not_in` के लिए कोई प्रोटोकॉल कमांड नहीं | `Unsupported` लौटाता है; `where_field` इस्तेमाल करें |
 | XunSearch | सर्वर केवल एक ही सॉर्ट फ़ील्ड का समर्थन करता है | कई `order_by` देने पर `Unsupported` लौटाता है |
-| XunSearch | सॉफ़्ट डिलीट लागू नहीं है | `soft_delete` / `only_trashed` `Unsupported` लौटाते हैं |
+| XunSearch | सॉफ़्ट डिलीट लागू नहीं है | `soft_delete` / `soft_delete_in` / `only_trashed` `Unsupported` लौटाते हैं |
 | XunSearch | इंडेक्स बनाने के लिए फ़ील्ड-स्कीम ini चाहिए | `create_index` `Unsupported` लौटाता है (`XunSearchEngine::new` को एक ini दें) |
+| Typesense | खाली न होने वाला `q` `query_by` माँगता है | `.option("query_by", "field1,field2")` न देने पर बैकएंड 400 `Parameter \`query_by\` is required` लौटाता है; ड्राइवर अपनी ओर से कोई फ़ील्ड नहीं मान लेता (ग़लत अनुमान क्रम चुपचाप बदल देगा) |
+| Meilisearch / Algolia | लेखन बैकएंड के टास्क (task) के रूप में होता है | `update` / `update_bulk` / `delete` / `delete_in` टास्क एंडपॉइंट को अंतिम स्थिति तक पूछते रहते हैं (30 सेकंड की सीमा) और टास्क विफल होने पर त्रुटि लौटाते हैं; बल्क लेखन इससे धीमा हो गया है, बदले में डेटा चुपचाप नहीं खोता |
+| database | `reindex` **ले जाता** है, नक़ल नहीं करता | स्रोत इंडेक्स खाली हो जाता है (`id` वैश्विक प्राइमरी की है, एक ही id दो इंडेक्स में नहीं रह सकती); स्रोत बचाना हो तो database ड्राइवर इस्तेमाल न करें |
+| XunSearch | अब `index: None` का अर्थ `default` नाम का इंडेक्स है | बाक़ी सात ड्राइवरों की तरह; पहले यह xunsearchd सर्वर के डिफ़ॉल्ट डेटाबेस `db` में चला जाता था — `index: None` से लिखा डेटा अब `index("db")` देकर ही मिलेगा |
 | डिफ़ॉल्ट परिणाम-संख्या | `take` न देने पर collection / database **सभी** मैच लौटाते हैं | बाक़ी छह ड्राइवर डिफ़ॉल्ट रूप से **10** लौटाते हैं (उनके बैकएंड की चिरपरिचित सीमा) |
 
 दो जानबूझकर किए गए अर्थ-मेल:
@@ -229,7 +234,7 @@ engine.update_bulk(&docs).await?;                              // बल्क �
 engine.flush("books").await?;                                  // दृश्यता रीफ़्रेश करें
 engine.search(&builder).await?;                                // क्वेरी
 engine.delete_in("books", &["book-1".to_string()]).await?;     // एक इंडेक्स से दस्तावेज़ हटाएँ
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // सॉफ़्ट डिलीट (चिह्न लगाएँ)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // सॉफ़्ट डिलीट (चिह्न लगाएँ; XunSearch: Unsupported)
 engine.reindex("books", "books_v2").await?;                    // इंडेक्स पुनर्निर्मित करें
 engine.delete_index("books").await?;                           // इंडेक्स हटाएँ
 ```
@@ -238,10 +243,11 @@ engine.delete_index("books").await?;                           // इंडे�
 > (इन-मेमोरी ड्राइवर सभी इंडेक्स में हटाता है, ES केवल `default` को छूता है)। किसी
 > निश्चित इंडेक्स के लिए `delete_in` इस्तेमाल करें।
 >
-> सॉफ़्ट डिलीट का भी यही हाल: **`soft_delete_in(index, ids)` ही वह है जो हर इंजन पर भरोसेमंद है**।
-> बिना इंडेक्स वाला `soft_delete` केवल सिंक्रोनस बैकएंड (`collection` / `database`) पर ही सभी
-> इंडेक्स में चिह्न लगा सकता है; HTTP बैकएंड यह नहीं कर सकते और `ScoutError::Unsupported`
-> लौटाते हैं (चुपचाप कुछ न करने के बजाय)।
+> सॉफ़्ट डिलीट का भी यही हाल: `soft_delete_in(index, ids)` आठ में से सात इंजनों पर भरोसेमंद रास्ता है —
+> **XunSearch न तो `soft_delete` लागू करता है और न `soft_delete_in`**, दोनों
+> `ScoutError::Unsupported` लौटाते हैं। बिना इंडेक्स वाला `soft_delete` केवल सिंक्रोनस बैकएंड
+> (`collection` / `database`) पर ही सभी इंडेक्स में चिह्न लगा सकता है; HTTP बैकएंड यह नहीं कर सकते
+> और `ScoutError::Unsupported` लौटाते हैं (चुपचाप कुछ न करने के बजाय)।
 >
 > `flush` का अनुबंध है लिखाई की दृश्यता रीफ़्रेश करना — **कोई भी ड्राइवर इंडेक्स को खाली नहीं करता**:
 > ES `_refresh` भेजता है, XunSearch `CMD_INDEX_COMMIT` भेजता है, और बाक़ी ड्राइवरों में लिखाई
@@ -324,7 +330,9 @@ let engine = EngineManager::new(config).engine()?;
 
 | वेरिएंट | कब उत्पन्न होता है | feature |
 |------|----------|---------|
-| `InvalidIndexName` | इंडेक्स नाम में रिक्त स्थान / `/` / `\` हो, `.` से शुरू हो, या खाली हो (लिखने से पहले सत्यापन) | अंतर्निहित |
+| `InvalidIndexName` | इंडेक्स नाम में रिक्त स्थान / `/` / `\` / `"` / `'` / `;` / `` ` `` हो, नाम खाली हो, `.` / `-` / `_` से शुरू हो, या उसमें वाइल्डकार्ड / बहु-इंडेक्स अक्षर (`*` `?` `,` `+`) हों (लिखने से पहले सत्यापन) | अंतर्निहित |
+| `InvalidHost` | होस्ट में क्रेडेंशियल भीतर हो (`http://user:pass@host`); त्रुटि में होस्ट दोबारा नहीं दिखाया जाता | अंतर्निहित |
+| `InvalidFieldName` | फ़िल्टर या सॉर्ट फ़ील्ड में रिक्त स्थान या ऑपरेटर अक्षर हो; केवल अक्षर, अंक, `_`, `-` और `.` मान्य हैं | अंतर्निहित |
 | `InvalidResult` | दस्तावेज़ फ़ील्ड JSON ऑब्जेक्ट न हो | अंतर्निहित |
 | `Unsupported` | ड्राइवर का feature सक्रिय न हो, आवश्यक कॉन्फ़िग गायब हो, या इंजन वह ऑपरेशन समर्थित न करे | अंतर्निहित |
 | `Json` | serde सीरियलाइज़ेशन / डीसीरियलाइज़ेशन त्रुटि | अंतर्निहित |
@@ -335,24 +343,17 @@ let engine = EngineManager::new(config).engine()?;
 
 प्रत्येक वेरिएंट के साथ एक निदान संकेत जुड़ा है, देखें [`ScoutError::pet_hint()`](#प्रोजेक्ट-पेट)।
 
-### बिज़नेस मॉडल ब्रिजिंग (Searchable)
-
-`Searchable` लागू करके अपने बिज़नेस स्ट्रक्चर को इंडेक्स-योग्य दस्तावेज़ में मैप करें, और
-`SearchableStore` लागू करके तीन ऑपरेशन — `index_documents` / `remove_documents` / `search` —
-को समाहित करें:
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **सुरक्षा सीमा।** भीतर क्रेडेंशियल वाले होस्ट (`http://user:pass@host`) अस्वीकार होते हैं
+> (`InvalidHost`) — reqwest की त्रुटि `Display` पूरा URL जोड़ देती है, यानी एक विफलता ही पासवर्ड
+> लॉग में पहुँचा देगी। रीडायरेक्ट केवल **समान-मूल** (scheme + host + port एक जैसे) पर फ़ॉलो होते
+> हैं, क्योंकि reqwest होस्ट बदलने पर केवल मानक ऑथ हेडर हटाता है और `X-TYPESENSE-API-KEY` /
+> `X-Algolia-API-Key` कस्टम हेडर हैं जो पराए होस्ट तक चले जाते। इसका चिरपरिचित परिणाम: रीडायरेक्ट
+> हुआ POST बिना बॉडी के GET बनकर पहुँच सकता है (RFC 7231), यानी लेखन-पथ रीडायरेक्ट करने वाला
+> रिवर्स प्रॉक्सी पारदर्शी नहीं रहता। फ़िल्टर/सॉर्ट फ़ील्ड नाम `validate_field_name` से गुज़रते हैं
+> (केवल अक्षर, अंक, `_`, `-`, `.`; `author.name` और ग़ैर-ASCII नाम अब भी मान्य)। और
+> `ScoutConfig` का `Debug` रहस्य छिपा देता है (`*.api_key` / `*secret*` / `*password*` / `*token`
+> `"<redacted>"` बन जाते हैं), जबकि `Serialize` उन्हें यथावत लिखता है — लॉग के लिए `{:?}` इस्तेमाल
+> करें, `serde_json::to_string` कभी नहीं।
 
 ## प्रोजेक्ट पेट
 
@@ -425,8 +426,8 @@ eprintln!("{}", pet::format_error(&err));
 
 ### वीचैट / अलीपे
 
-<img src="../../../docs/weixinpay.png" alt="वीचैट दान" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="अलीपे दान" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="वीचैट दान" width="130"/>
+<img src="../../../docs/alipay.png" alt="अलीपे दान" width="130"/>
 
 वीचैट से स्कैन करें · अलीपे से स्कैन करें
 
@@ -434,16 +435,16 @@ eprintln!("{}", pet::format_error(&err));
 
 | नेटवर्क | वॉलेट पता | QR कोड |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### वैश्विक स्थानांतरण (बैंक रेमिटेंस)
 

@@ -43,7 +43,7 @@ let result = engine.search(
 | 🗑️ Penghapusan lunak | `soft_delete_in(index, ids)` memberi tanda `__soft_deleted`; penyaringan tiga mode `with_trashed()` / `only_trashed()` |
 | 📦 Operasi massal | `update_bulk` / `delete_bulk` mengurangi pulang-pergi; `delete_in` menghapus tepat pada indeks tertentu |
 | 🔌 Driver plug-and-play | Bawaan in-memory tanpa dependensi; 8 backend masing-masing di balik feature — yang tak dipakai tidak dikompilasi |
-| 🔒 Batas keamanan | Validasi nama indeks (`validate_index_name`) + pengodean persen RFC 3986 untuk mencegah injeksi path |
+| 🔒 Batas keamanan | Validasi nama indeks, nama field, dan host (`validate_index_name` / `validate_field_name` / `validate_host`) + pengodean persen RFC 3986 untuk mencegah injeksi path |
 | 🤖 Hewan peliharaan | Scout si Robot Pencari: banner terminal + petunjuk penelusuran per kesalahan (`rust_scout::pet`) |
 
 ## Arsitektur
@@ -88,7 +88,6 @@ rust-scout/
 │   ├── builder.rs          # SearchBuilder / Where / Order / TrashedFilter: kueri berantai
 │   ├── document.rs         # SearchDocument: dokumen yang ditulis (kontrak serde JSON)
 │   ├── result.rs           # SearchResult / SearchHit: hasil kueri
-│   ├── searchable.rs       # Searchable / SearchableStore: jembatan ke model bisnis
 │   ├── error.rs            # ScoutError + Result<T> + pet_hint()
 │   ├── pet.rs              # hewan peliharaan: Scout si Robot Pencari (banner + petunjuk kesalahan)
 │   │
@@ -118,6 +117,8 @@ rust-scout/
 
 > Label `[feature]` menandai Cargo feature yang dibutuhkan driver. Bila tidak aktif,
 > `EngineManager` mengembalikan `ScoutError::Unsupported`, bukan menurunkan kemampuan diam-diam.
+> String `driver` yang tak dikenal (salah ketik, spasi di akhir, atau huruf besar-kecil keliru
+> seperti `OpenSearch`) juga error — dulu ia diam-diam jatuh ke driver in-memory.
 
 ### Perbedaan Kemampuan Driver
 
@@ -129,8 +130,12 @@ ia **mengatakannya secara eksplisit** alih-alih diam-diam mengembalikan hasil ya
 | Algolia | Pengurutan memerlukan indeks replika yang dibuat lebih dulu; tidak bisa dipilih per kueri | `order_by` **diabaikan** (hasil tetap dikembalikan, hanya urutannya tak tentu) |
 | XunSearch | Tidak ada perintah protokol untuk `where_in` / `where_not_in` | mengembalikan `Unsupported`; gunakan `where_field` |
 | XunSearch | Server hanya mendukung satu field pengurutan | beberapa `order_by` mengembalikan `Unsupported` |
-| XunSearch | Soft delete belum diimplementasikan | `soft_delete` / `only_trashed` mengembalikan `Unsupported` |
+| XunSearch | Soft delete belum diimplementasikan | `soft_delete` / `soft_delete_in` / `only_trashed` mengembalikan `Unsupported` |
 | XunSearch | Membuat indeks memerlukan ini skema field | `create_index` mengembalikan `Unsupported` (berikan ini ke `XunSearchEngine::new`) |
+| Typesense | `q` yang tidak kosong mewajibkan `query_by` | tanpa `.option("query_by", "field1,field2")` backend menjawab 400 `Parameter \`query_by\` is required`; driver tidak menebak field sendiri (tebakan yang salah akan diam-diam mengubah urutan) |
+| Meilisearch / Algolia | Penulisan berjalan sebagai task di backend | `update` / `update_bulk` / `delete` / `delete_in` memantau endpoint task sampai status akhir (batas 30 detik) dan mengembalikan error bila task gagal; penulisan massal jadi lebih lambat, tetapi data tidak lagi hilang diam-diam |
+| database | `reindex` **memindahkan**, bukan menyalin | indeks sumber dikosongkan (`id` adalah kunci utama global, satu id tidak bisa ada di dua indeks); bila sumber harus tetap ada, jangan pakai driver database |
+| XunSearch | `index: None` kini berarti indeks bernama `default` | sama seperti tujuh driver lainnya; sebelumnya ia jatuh ke basis data bawaan server xunsearchd (`db`) — data yang ditulis lewat `index: None` hanya terjangkau dengan `index("db")` |
 | Jumlah bawaan | Tanpa `take`, collection / database mengembalikan **semua** hasil | Enam driver lainnya mengembalikan **10** secara bawaan (batas kebiasaan backend masing-masing) |
 
 Ada dua penyelarasan semantik yang disengaja:
@@ -236,7 +241,7 @@ engine.update_bulk(&docs).await?;                              // tulis massal (
 engine.flush("books").await?;                                  // segarkan visibilitas
 engine.search(&builder).await?;                                // kueri
 engine.delete_in("books", &["book-1".to_string()]).await?;     // hapus dokumen dari satu indeks
-engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // hapus lunak (memberi tanda)
+engine.soft_delete_in("books", &["book-2".to_string()]).await?;            // hapus lunak (memberi tanda; XunSearch: Unsupported)
 engine.reindex("books", "books_v2").await?;                    // bangun ulang indeks
 engine.delete_index("books").await?;                           // hapus indeks
 ```
@@ -245,10 +250,11 @@ engine.delete_index("books").await?;                           // hapus indeks
 > (driver in-memory menghapus lintas indeks, ES hanya menyentuh `default`).
 > Untuk menargetkan satu indeks secara tepat, gunakan `delete_in`.
 >
-> Hal yang sama berlaku untuk hapus lunak: **`soft_delete_in(index, ids)` adalah yang andal
-> di semua mesin**. `soft_delete` tanpa indeks hanya dapat menandai lintas indeks pada
-> backend sinkron (`collection` / `database`); backend HTTP tidak bisa dan mengembalikan
-> `ScoutError::Unsupported` (bukan diam-diam tidak melakukan apa pun).
+> Hal yang sama berlaku untuk hapus lunak: `soft_delete_in(index, ids)` adalah jalur yang andal
+> pada tujuh dari delapan mesin — **XunSearch tidak mengimplementasikan `soft_delete` maupun
+> `soft_delete_in`**, keduanya mengembalikan `ScoutError::Unsupported`. `soft_delete` tanpa indeks
+> hanya dapat menandai lintas indeks pada backend sinkron (`collection` / `database`); backend HTTP
+> tidak bisa dan mengembalikan `ScoutError::Unsupported` (bukan diam-diam tidak melakukan apa pun).
 >
 > Kontrak `flush` adalah "menyegarkan visibilitas tulisan", **tidak ada driver yang
 > mengosongkan indeks**: ES memakai `_refresh`, XunSearch mengirim `CMD_INDEX_COMMIT`, dan
@@ -332,7 +338,9 @@ Semua operasi mengembalikan `crate::Result<T>`, dengan kesalahan menyatu ke `Sco
 
 | Varian | Pemicu | feature |
 |---------|--------------|---------|
-| `InvalidIndexName` | nama indeks memuat spasi / `/` / `\`, diawali `.`, atau kosong (divalidasi sebelum menulis) | bawaan |
+| `InvalidIndexName` | nama indeks memuat spasi / `/` / `\` / `"` / `'` / `;` / `` ` ``, kosong, diawali `.` / `-` / `_`, atau memuat karakter wildcard / multi-indeks (`*` `?` `,` `+`) — divalidasi sebelum menulis | bawaan |
+| `InvalidHost` | host memuat kredensial (`http://user:pass@host`); host tidak diulang di pesan error | bawaan |
+| `InvalidFieldName` | field filter atau urut memuat spasi atau karakter operator; hanya huruf, angka, `_`, `-`, dan `.` yang diizinkan | bawaan |
 | `InvalidResult` | field dokumen bukan objek JSON | bawaan |
 | `Unsupported` | feature driver tidak aktif, konfigurasi wajib kurang, atau mesin tidak mendukung operasi itu | bawaan |
 | `Json` | kesalahan serialisasi / deserialisasi serde | bawaan |
@@ -343,24 +351,17 @@ Semua operasi mengembalikan `crate::Result<T>`, dengan kesalahan menyatu ke `Sco
 
 Setiap varian membawa petunjuk penelusuran — lihat [`ScoutError::pet_hint()`](#hewan-peliharaan-proyek).
 
-### Menjembatani Model Bisnis (Searchable)
-
-Implementasikan `Searchable` untuk memetakan struktur bisnis menjadi dokumen yang dapat
-diindeks, dan `SearchableStore` untuk membungkus tiga operasi `index_documents` /
-`remove_documents` / `search`:
-
-```rust
-use rust_scout::{Searchable, SearchableStore, SearchDocument, SearchResult};
-
-struct Article { id: String, title: String, body: String }
-
-impl Searchable for Article {
-    fn searchable_id(&self) -> String { self.id.clone() }
-    fn to_searchable_json(&self) -> serde_json::Value {
-        serde_json::json!({ "title": self.title, "body": self.body })
-    }
-}
-```
+> **Batas keamanan.** Host berisi kredensial (`http://user:pass@host`) ditolak (`InvalidHost`) —
+> `Display` error reqwest menambahkan URL lengkap, jadi satu kegagalan saja sudah membawa kata
+> sandi ke log. Pengalihan hanya diikuti **same-origin** (scheme, host, dan port sama), karena
+> reqwest hanya melepas header autentikasi standar saat host berganti dan `X-TYPESENSE-API-KEY` /
+> `X-Algolia-API-Key` akan ikut ke host asing. Akibat lazimnya: POST yang dialihkan bisa tiba
+> sebagai GET tanpa body (RFC 7231), jadi reverse proxy yang mengalihkan jalur tulis tidak
+> transparan. Nama field filter dan urut melewati `validate_field_name` (hanya huruf, angka, `_`,
+> `-`, `.`; `author.name` dan nama non-ASCII tetap boleh). Dan `Debug` pada `ScoutConfig`
+> menyamarkan rahasia (`*.api_key` / `*secret*` / `*password*` / `*token` menjadi `"<redacted>"`),
+> sedangkan `Serialize` tetap menuliskannya apa adanya — untuk log gunakan `{:?}`, jangan
+> `serde_json::to_string`.
 
 ## Hewan Peliharaan Proyek
 
@@ -434,8 +435,8 @@ Jika proyek ini bermanfaat bagi Anda, dukunglah dengan donasi ☕ — dukungan A
 
 ### WeChat / Alipay
 
-<img src="../../../docs/weixinpay.png" alt="Donasi via WeChat" width="130" height="130"/>
-<img src="../../../docs/alipay.png" alt="Donasi via Alipay" width="130" height="130"/>
+<img src="../../../docs/weixinpay.png" alt="Donasi via WeChat" width="130"/>
+<img src="../../../docs/alipay.png" alt="Donasi via Alipay" width="130"/>
 
 Pindai dengan WeChat · Pindai dengan Alipay
 
@@ -443,16 +444,16 @@ Pindai dengan WeChat · Pindai dengan Alipay
 
 | Jaringan | Alamat Dompet | Kode QR |
 |------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130" height="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130" height="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130" height="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130" height="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130" height="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130" height="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130" height="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130" height="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130" height="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130" height="130"/> |
+| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
+| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
+| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
+| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
+| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
+| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
+| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
+| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
+| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
+| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
 
 ### Transfer Global (Transfer Bank)
 

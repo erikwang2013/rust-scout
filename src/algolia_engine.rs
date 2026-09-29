@@ -1,10 +1,35 @@
 #![cfg(feature = "algolia")]
 
+use std::time::Duration;
+
 use serde_json::{Map, Value};
 
 use crate::config::percent_encode;
 use crate::engine::{Engine, EngineFuture};
 use crate::{SearchBuilder, SearchDocument, SearchHit, SearchResult, TrashedFilter};
+
+/// 写入任务（`GET /1/indexes/{index}/task/{taskID}`）的轮询间隔与总超时。超时即
+/// 报错，不静默接受「结果未知」——官方 JS 客户端重试用尽时同样抛错。
+/// 间隔取官方客户端的退避下界（`min(retry * 200, 5000)` 起步 200ms），总时长按
+/// 驱动侧的请求超时（30s）对齐。
+const TASK_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const TASK_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 客户端：同源重定向 + 超时。
+///
+/// - 超时：reqwest 的 async 默认 `connect_timeout`/`timeout` 都是 `None`，
+///   接得上 TCP 却不回包的 peer 会让请求永久挂起。
+/// - 重定向：reqwest 换 host 时只摘 `Authorization`/`Cookie` 等 5 个已知头，
+///   **自定义头不动**，`X-Algolia-API-Key`/`-Application-Id` 会被 302 原样送到
+///   别的 host。不用 `Policy::none()`：那连反向代理的同源跳转一起掐掉。
+fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(crate::config::same_origin_redirect_policy())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
 
 /// Algolia 引擎（标准端点 `https://{app_id}.algolia.net`）。文档主键为
 /// `objectID` 保留键，软删除标记 `__soft_deleted` 布尔字段。
@@ -28,7 +53,7 @@ impl AlgoliaEngine {
             host,
             app_id,
             api_key,
-            client: reqwest::Client::new(),
+            client: client(),
         }
     }
 
@@ -54,9 +79,11 @@ impl AlgoliaEngine {
         body: Option<String>,
         content_type: Option<&str>,
     ) -> crate::Result<(reqwest::StatusCode, String)> {
-        let mut request = self
-            .client
-            .request(method.clone(), format!("{}{}", self.base_url()?, path));
+        let base = self.base_url()?;
+        // 校验先于任何 I/O：带 userinfo 的 host 一旦请求失败，reqwest 的错误
+        // Display 会把完整 URL（含密码）拼进日志。
+        crate::validate_host(base)?;
+        let mut request = self.client.request(method.clone(), format!("{}{}", base, path));
         request = request.header("X-Algolia-Application-Id", &self.app_id);
         request = request.header("X-Algolia-API-Key", &self.api_key);
         if let Some(body) = body {
@@ -108,15 +135,20 @@ impl AlgoliaEngine {
     /// 等值/IN/软删除 → Algolia filters 表达式；多条件用逗号（AND 语义）。
     /// 注意与 PHP 版的差异：IN 用括号 `(field: v1 OR v2)`，NOT IN 加 NOT 前缀，
     /// 避免 OR 吞掉逗号连接的其它条件。
-    fn build_filters(builder: &SearchBuilder) -> Option<String> {
+    ///
+    /// 字段名先过 [`crate::validate_field_name`]：表达式是文本拼接，值转了义而字段名
+    /// 曾经裸拼，`where_field("x OR NOT x", ..)` 之类的值能把整条表达式改写。
+    fn build_filters(builder: &SearchBuilder) -> crate::Result<Option<String>> {
         let mut parts: Vec<String> = Vec::new();
         for w in &builder.wheres {
+            crate::validate_field_name(&w.field)?;
             parts.push(format!("{}={}", w.field, Self::filter_value(&w.value)));
         }
         for (field, values) in &builder.where_ins {
             if values.is_empty() {
                 continue; // 空 IN 集合 = 不匹配任何，由 search/paginate 短路
             }
+            crate::validate_field_name(field)?;
             let ors = values.iter().map(Self::filter_value).collect::<Vec<_>>().join(" OR ");
             parts.push(format!("({}: {})", field, ors));
         }
@@ -124,6 +156,7 @@ impl AlgoliaEngine {
             if values.is_empty() {
                 continue; // 空 NOT IN 集合 = 无过滤（Collection 语义）
             }
+            crate::validate_field_name(field)?;
             let ors = values.iter().map(Self::filter_value).collect::<Vec<_>>().join(" OR ");
             parts.push(format!("NOT ({}: {})", field, ors));
         }
@@ -133,9 +166,9 @@ impl AlgoliaEngine {
             TrashedFilter::WithTrashed => {}
         }
         if parts.is_empty() {
-            None
+            Ok(None)
         } else {
-            Some(parts.join(","))
+            Ok(Some(parts.join(",")))
         }
     }
 
@@ -149,17 +182,17 @@ impl AlgoliaEngine {
     /// offset 才能精确命中第 15..25 条。两者互斥，只发 offset 一组；Algolia 的
     /// offset 与 length 成对出现才走偏移分页（只给 offset 可能退回页语义），
     /// 所以条数用 `length` 而不是 `hitsPerPage`。`nbHits`（总匹配数）不受影响。
-    fn search_body(builder: &SearchBuilder, offset: usize, limit: usize) -> Value {
+    fn search_body(builder: &SearchBuilder, offset: usize, limit: usize) -> crate::Result<Value> {
         let mut body = Map::new();
         body.insert("query".into(), Value::String(builder.query.clone()));
         body.insert("offset".into(), Value::from(offset));
         body.insert("length".into(), Value::from(limit));
-        if let Some(filters) = Self::build_filters(builder) {
+        if let Some(filters) = Self::build_filters(builder)? {
             body.insert("filters".into(), Value::String(filters));
         }
         // order_by 不生效：Algolia 排序需预建 replica index 并在查询时用
         // `replicas` 参数——Rust 侧未做，避免静默假装支持（注释留档）。
-        Value::Object(body)
+        Ok(Value::Object(body))
     }
 
     /// 文档 → Algolia record；`objectID` 保留键统一注入/覆盖为 doc.id。
@@ -204,7 +237,50 @@ impl AlgoliaEngine {
 }
 
 impl AlgoliaEngine {
-    /// batch 端点；requests 为空则跳过。
+    /// `copy` 操作体。`destination` 是**索引名字符串**（官方 JS 客户端
+    /// `operationIndex` 的形状）：写成 `{"index": to}` 对象每次都是 400/422，
+    /// README 却把 `reindex` 宣传成所有驱动通用。
+    fn reindex_body(to: &str) -> Value {
+        serde_json::json!({"operation": "copy", "destination": to})
+    }
+
+    /// 等待写入任务发布。
+    ///
+    /// `batch`（写入与删除）与 `operation`（reindex）都只回 `{taskID, ...}`：
+    /// **请求被受理不等于记录已可搜索**，任务发布前索引里看不到它，任务级失败也
+    /// 只能在任务终态上看到。不读 taskID 就等于把「已入队」当「已写入」，而且驱动
+    /// 里再没有别的地方能看到它（`flush` 是 no-op）。官方 JS 客户端
+    /// （`searchClient.waitForTask`）同样轮询到终态，`chunkedBatch`/`deleteObjects`
+    /// 默认带 `waitForTasks`。
+    ///
+    /// 状态枚举见官方 OpenAPI（`common/responses/common.yml#/taskStatus`）：**只有
+    /// `published` 与 `notPublished`**，后者是「尚未发布」而不是失败，所以它落在
+    /// 继续轮询的一侧而不是错误分支；任务真出不来只会表现为迟迟到不了 `published`，
+    /// 由超时报错兜住。响应里没有 `taskID`（旧接口或中间代理）时无从确认，按成功处理。
+    async fn await_task(&self, index: &str, response: &Value) -> crate::Result<()> {
+        let Some(task_id) = response.get("taskID").and_then(Value::as_u64) else {
+            return Ok(());
+        };
+        let path = format!("/1/indexes/{}/task/{}", percent_encode(index), task_id);
+        let deadline = std::time::Instant::now() + TASK_POLL_TIMEOUT;
+        loop {
+            let task = self.request(reqwest::Method::GET, &path, None).await?;
+            if task.get("status").and_then(Value::as_str) == Some("published") {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                // 超时不静默放行：写入结果未知，报错比谎报成功安全
+                return Err(crate::ScoutError::Backend(format!(
+                    "写入任务 {task_id} 在 {}s 内未 published，写入结果未知",
+                    TASK_POLL_TIMEOUT.as_secs()
+                )));
+            }
+            // 用 tokio 的定时器：async 里 `thread::sleep` 会占死一个运行时工作线程
+            tokio::time::sleep(TASK_POLL_INTERVAL).await;
+        }
+    }
+
+    /// batch 端点；requests 为空则跳过。响应带 `taskID`，等它发布才算写完。
     async fn batch(&self, index: &str, requests: Vec<Value>) -> crate::Result<()> {
         if requests.is_empty() {
             return Ok(());
@@ -212,8 +288,8 @@ impl AlgoliaEngine {
         crate::validate_index_name(index)?;
         let path = format!("/1/indexes/{}/batch", percent_encode(index));
         let body = serde_json::json!({"requests": requests});
-        let _ = self.request(reqwest::Method::POST, &path, Some(body)).await?;
-        Ok(())
+        let task = self.request(reqwest::Method::POST, &path, Some(body)).await?;
+        self.await_task(index, &task).await
     }
 }
 
@@ -257,7 +333,7 @@ impl Engine for AlgoliaEngine {
         let limit = builder.take.unwrap_or(10);
         let want_none = builder.take == Some(0);
         Box::pin(async move {
-            let body = Self::search_body(builder, offset, limit.max(1));
+            let body = Self::search_body(builder, offset, limit.max(1))?;
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             let result = Self::parse_search_response(&raw);
@@ -280,7 +356,7 @@ impl Engine for AlgoliaEngine {
         Box::pin(async move {
             let index = builder.index.as_deref().unwrap_or("default");
             crate::validate_index_name(index)?;
-            let body = Self::search_body(builder, offset, per_page);
+            let body = Self::search_body(builder, offset, per_page)?;
             let path = format!("/1/indexes/{}/query", percent_encode(index));
             let raw = self.request(reqwest::Method::POST, &path, Some(body)).await?;
             Ok(Self::parse_search_response(&raw))
@@ -409,188 +485,16 @@ impl Engine for AlgoliaEngine {
         Box::pin(async move {
             crate::validate_index_name(from)?;
             crate::validate_index_name(to)?;
-            let body = serde_json::json!({
-                "operation": "copy",
-                "destination": {"index": to}
-            });
             let path = format!("/1/indexes/{}/operation", percent_encode(from));
-            let _ = self.request(reqwest::Method::POST, &path, Some(body)).await?;
-            Ok(())
+            let task = self.request(reqwest::Method::POST, &path, Some(Self::reindex_body(to))).await?;
+            // 复制同样是任务制，等它发布完目标索引才搜得到。任务挂在**目标**索引上
+            // ——官方客户端 `replaceAllObjects` 里 copy 就是拿 destination 的名字
+            // 去 `waitForTask` 的（`/1/indexes/{index}/task/{taskID}` 认索引名）。
+            self.await_task(to, &task).await
         })
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::SearchBuilder;
-
-    #[test]
-    fn filters_join_with_comma_and_or_groups() {
-        let builder = SearchBuilder::new("")
-            .where_field("active", true)
-            .where_field("price", 10)
-            .where_in("tag", ["a", "b"])
-            .where_not_in("tag", ["x"]);
-        let filters = AlgoliaEngine::build_filters(&builder).unwrap();
-        assert_eq!(
-            filters,
-            r#"active=true,price=10,(tag: "a" OR "b"),NOT (tag: "x"),NOT __soft_deleted:true"#
-        );
-    }
-
-    #[test]
-    fn filters_trashed_variants() {
-        assert_eq!(
-            AlgoliaEngine::build_filters(&SearchBuilder::new("")).unwrap(),
-            "NOT __soft_deleted:true"
-        );
-        assert_eq!(
-            AlgoliaEngine::build_filters(&SearchBuilder::new("").only_trashed()).unwrap(),
-            "__soft_deleted:true"
-        );
-        assert_eq!(
-            AlgoliaEngine::build_filters(&SearchBuilder::new("").with_trashed()),
-            None
-        );
-    }
-
-    #[test]
-    fn doc_uses_object_id_key() {
-        let doc =
-            SearchDocument::new("a", serde_json::json!({"objectID": "wrong", "title": "x"}))
-                .unwrap();
-        let record = AlgoliaEngine::doc_to_record(&doc);
-        assert_eq!(record["objectID"], "a"); // 覆盖保留键
-        assert_eq!(record["title"], "x");
-    }
-
-    #[test]
-    fn search_body_sends_offset_and_filters() {
-        let builder = SearchBuilder::new("q").where_field("cat", 1);
-        let body = AlgoliaEngine::search_body(&builder, 20, 10);
-        assert_eq!(body["query"], "q");
-        assert_eq!(body["offset"], 20);
-        assert_eq!(body["length"], 10);
-        // offset/length 与 page/hitsPerPage 互斥，只发偏移那一组
-        assert!(body.get("page").is_none(), "page 会把 skip 取整到页边界");
-        assert!(body.get("hitsPerPage").is_none());
-        assert_eq!(body["filters"], "cat=1,NOT __soft_deleted:true");
-    }
-
-    #[test]
-    fn search_body_honours_exact_skip_and_paginate_pages() {
-        // `skip(15).take(10)` 必须命中第 15..25 条：曾经发的是 page(=skip/per_page=1)，
-        // 服务端按页返回第 10..20 条。
-        let body = AlgoliaEngine::search_body(&SearchBuilder::new("q"), 15, 10);
-        assert_eq!(body["offset"], 15);
-        assert_eq!(body["length"], 10);
-        // paginate 的页语义按 (N-1)*per_page 换算，仍然返回第 N 页
-        assert_eq!(AlgoliaEngine::page_offset(1, 10), 0);
-        assert_eq!(AlgoliaEngine::page_offset(2, 10), 10);
-        assert_eq!(AlgoliaEngine::page_offset(3, 7), 14);
-        assert_eq!(AlgoliaEngine::page_offset(0, 10), 0); // 第 0 页按第 1 页
-    }
-
-    #[test]
-    fn parse_response_uses_object_id_and_nb_hits() {
-        let raw = serde_json::json!({
-            "hits": [{
-                "objectID": "1",
-                "title": "a",
-                "_highlightResult": {"title": {"value": "<em>a</em>"}}
-            }],
-            "nbHits": 7
-        });
-        let result = AlgoliaEngine::parse_search_response(&raw);
-        assert_eq!(result.total, 7);
-        assert_eq!(result.hits[0].id, "1");
-        assert_eq!(result.hits[0].score, None);
-        // Algolia 元数据原样保留在 source 中
-        assert_eq!(
-            result.hits[0].source["_highlightResult"]["title"]["value"],
-            "<em>a</em>"
-        );
-    }
-
-    #[test]
-    fn parse_response_nb_hits_missing_falls_back() {
-        let raw = serde_json::json!({"hits": [{"objectID": "1"}]});
-        assert_eq!(AlgoliaEngine::parse_search_response(&raw).total, 1);
-    }
-
-    #[tokio::test]
-    async fn flush_is_a_noop_and_makes_no_request() {
-        // 指向必然连不上的 app_id：真的打网络就会失败，返回 Ok 即证明没有请求。
-        // flush 的契约是「刷新可见性」，绝不能是清空索引——README 的生命周期示例
-        // 在 update 与 search 之间调用它，而这里曾打 /clear 把索引清空。
-        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
-        engine.flush("books").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn take_zero_keeps_total_and_drops_hits() {
-        // take(0) 的契约（Collection/ES 基准）是「命中总数 + 空 hits」：total 在分页
-        // 之前算出。实现改为照发请求（只取 1 条）再清空 hits，见 result.rs::without_hits。
-        let r = SearchResult {
-            hits: vec![],
-            total: 7,
-            ..SearchResult::default()
-        };
-        let trimmed = r.without_hits();
-        assert!(trimmed.hits.is_empty());
-        assert_eq!(trimmed.total, 7);
-    }
-
-    #[tokio::test]
-    async fn invalid_app_id_fails_before_sending_the_api_key() {
-        // app_id 直接拼进主机名：`evil@attacker.com` 会把请求（连同
-        // X-Algolia-API-Key 头）送到 attacker.com.algolia.net。校验必须先于任何
-        // 网络调用失败，且错误要说清楚原因。
-        let bad = AlgoliaEngine::new("evil@attacker.com".to_string(), "secret".to_string());
-        let err = bad
-            .search(&SearchBuilder::new("q"))
-            .await
-            .expect_err("非法 app_id 必须报错，而不是把 API key 发到别的主机");
-        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
-
-        // 合法 app_id 照常拼主机，别把正常配置一起禁掉
-        let ok = AlgoliaEngine::new("TESTAPPID".to_string(), "k".to_string());
-        assert_eq!(ok.base_url().unwrap(), "https://TESTAPPID.algolia.net");
-    }
-
-    #[tokio::test]
-    async fn index_less_soft_delete_is_refused_not_silently_skipped() {
-        // 曾经它硬编码 default，且 partialUpdateObject 默认 createIfNotExists=true，
-        // 会在 default 里凭空造一条幽灵记录。
-        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
-        let err = engine
-            .soft_delete(&["b1".to_string()])
-            .await
-            .expect_err("index-less soft_delete 必须报错，而不是静默 no-op");
-        assert!(matches!(err, crate::ScoutError::Unsupported(_)), "got {err:?}");
-    }
-
-    #[test]
-    fn empty_where_in_and_not_in_produce_no_filter_clause() {
-        // 空 IN 集合 = 不匹配任何（由 search/paginate 短路，不进 filter）；
-        // 空 NOT IN 集合 = 无过滤。两者都不该出现在 filters 里。
-        let b = SearchBuilder::new("q")
-            .where_in("tag", Vec::<&str>::new())
-            .where_not_in("cat", Vec::<&str>::new());
-        let f = AlgoliaEngine::build_filters(&b).unwrap_or_default();
-        assert!(!f.contains("tag:") && !f.contains("cat:"), "got {f:?}");
-    }
-
-
-    #[tokio::test]
-    async fn reserved_index_name_is_rejected_even_with_empty_where_in() {
-        let engine = AlgoliaEngine::new("testappid".to_string(), "k".to_string());
-        let err = engine
-            .search(&SearchBuilder::new("q").within("_all").where_in("t", Vec::<&str>::new()))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::ScoutError::InvalidIndexName(_)), "got {err:?}");
-    }
-
-}
+#[path = "algolia_engine_tests.rs"]
+mod tests;

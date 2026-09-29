@@ -2,6 +2,13 @@
 
 Date: 2026-08-31
 
+> **历史文档，故意保持原样。** 这是定稿当时的设计记录，用来回看当时的决策与取舍，
+> 不回填后续改动。API 此后已有变动：`Searchable` / `SearchableStore`
+> （`src/searchable.rs` 整个文件）、`Engine::map_ids`、`ScoutConfig::index_name()`
+> 以及 `ScoutConfig` 的 `prefix` / `queue` / `after_commit` / `soft_delete` /
+> `identify` / `chunk_searchable` / `chunk_unsearchable` 占位字段均已移除。
+> **当前 API 以 `README.md` 与 rustdoc 为准**，本文中提到的这些名字已不存在。
+
 ## Context
 
 `erikwang2013/webman-scout` is a Laravel Scout-style full-text search package for PHP hosts: it maps searchable models to search engines, exposes a `Searchable` API, queues or synchronously syncs model changes, and routes searches through an engine manager plus query builder. The source also supports OpenSearch/Elasticsearch-oriented advanced queries such as filters, ranges, aggregations, facets, geo, highlight, and vector-style params.
