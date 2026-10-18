@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="150 80 220 300" width="220" height="300" role="img" aria-label="Scout · 撒娇 Coquettish"><title>Scout · 撒娇 Coquettish</title><desc>Scout 的 撒娇 表情形态 · animated expression form</desc><style>
+.ex-motion { animation: ex-sway 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+.ex-anim-tear { animation: ex-tear 1.8s ease-in infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-sweat { animation: ex-tear 1.5s ease-in infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-heart { animation: ex-heart 2.2s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-spark { animation: ex-spark 1.9s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-rain { animation: ex-rain 1.4s linear infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-confetti { animation: ex-confetti 2.4s linear infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-pulse { animation: ex-pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-knock { animation: ex-knock 0.55s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-knockline { animation: ex-knockline 0.55s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-palm { animation: ex-palm 0.9s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-steam { animation: ex-steam 1.8s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-shock { animation: ex-shock 0.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-please { animation: ex-please 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.ex-anim-drift { animation: ex-drift 4.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ex-sway { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(-2.5deg); } }
+@keyframes ex-tear { 0% { transform: translateY(0); opacity: 0; } 18% { opacity: 1; } 100% { transform: translateY(8.25px); opacity: 0; } }
+@keyframes ex-heart { 0% { transform: translateY(0) scale(.65); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(-13.5px) scale(1.15); opacity: 0; } }
+@keyframes ex-spark { 0%,100% { transform: scale(.6) rotate(0deg); opacity: .3; } 50% { transform: scale(1.15) rotate(25deg); opacity: 1; } }
+@keyframes ex-rain { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(9px); opacity: 0; } }
+@keyframes ex-confetti { 0% { transform: translateY(-4px) rotate(0deg); opacity: 1; } 100% { transform: translateY(14px) rotate(200deg); opacity: 0; } }
+@keyframes ex-pulse { 0%,100% { transform: scale(1); opacity: .35; } 50% { transform: scale(1.18); opacity: .7; } }
+@keyframes ex-knock { 0%,100% { transform: translateX(3.38px); } 35% { transform: translateX(0); } }
+@keyframes ex-knockline { 0%,100% { transform: scaleX(.6); opacity: .35; } 35% { transform: scaleX(1); opacity: 1; } }
+@keyframes ex-palm { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-1px) rotate(-4deg); } }
+@keyframes ex-steam { 0% { transform: translateY(0); opacity: .7; } 100% { transform: translateY(-7px); opacity: 0; } }
+@keyframes ex-shock { 0%,100% { transform: scaleX(.7); opacity: .4; } 50% { transform: scaleX(1.25); opacity: 1; } }
+@keyframes ex-please { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+@keyframes ex-drift { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ex-motion, [class*="ex-anim-"] { animation: none !important; }
+}
+</style><g class="ex-motion ex-coquettish"><g class="ex-base"><defs>
+    <style>.title { font-size: 24px; font-weight: 700; fill: #0f172a; }
+      .sub   { font-size: 12.5px; fill: #64748b; }
+
+      /* 机器人配色：白色/浅灰外壳 + 石板灰描边，与架构图同一套灰阶，不引入第二套色板 */
+      .body  { fill: #ffffff; stroke: #64748b; stroke-width: 3; }
+      .plate { fill: #e2e8f0; stroke: #64748b; stroke-width: 2.6; stroke-linejoin: round; }
+      .part  { fill: #cbd5e1; stroke: #64748b; stroke-width: 2.4; }
+      .visor { fill: #0f172a; }
+      .eye   { fill: #60a5fa; }
+      .lamp  { fill: #f59e0b; stroke: #64748b; stroke-width: 2.2; }
+
+      /* 手臂：两笔描边套出「浅灰管 + 石板灰轮廓」的效果 */
+      .limb-o { fill: none; stroke: #64748b; stroke-width: 17; stroke-linecap: round; }
+      .limb-i { fill: none; stroke: #cbd5e1; stroke-width: 12; stroke-linecap: round; }
+
+      /* 模块舱：浅色舱板 + 深色插槽，槽里嵌一枚彩色模块 */
+      .bay    { fill: #e2e8f0; stroke: #64748b; stroke-width: 2.4; }
+      .socket { fill: #0f172a; }
+      .glow   { fill: #10b981; opacity: 0.16; }
+      .ring   { fill: none; stroke: #10b981; stroke-width: 2.4; opacity: 0.6; }
+      .chip-mark { fill: #ffffff; opacity: 0.75; }
+
+      /* 正在插入的那一枚：空槽里的落位虚线框 + 飞行虚线弧 + 速度线，同色 */
+      .slot-empty { fill: none; stroke: #f59e0b; stroke-width: 1.8; stroke-dasharray: 3.5 3; opacity: 0.85; }
+      .arc  { fill: none; stroke: #f59e0b; stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 5 4.5; }
+      .tick { fill: none; stroke: #f59e0b; stroke-width: 2.4; stroke-linecap: round; }
+      .wire { fill: none; stroke: #64748b; stroke-width: 3; stroke-linecap: round; }
+
+      /* 查询卡片 / 结果面板 */
+      .card   { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .card-h { fill: #cbd5e1; }
+      .cl     { fill: #e2e8f0; }
+      .cl-hi  { fill: #2563eb; }
+      .cl-ok  { fill: #10b981; }
+      .badge  { fill: #10b981; }
+
+      .name  { font-size: 16px; font-weight: 700; fill: #0f172a; }
+      .role  { font-size: 11.5px; fill: #64748b; }</style>
+
+    
+    <g id="chip">
+      <rect x="-12" y="-12" width="24" height="24" rx="5"/>
+      <rect class="chip-mark" x="-7" y="-7.5" width="14" height="4" rx="2"/>
+    </g>
+  </defs>
+
+  <text x="280" y="38" text-anchor="middle" class="title">rust-scout 项目宠物</text>
+  <text x="280" y="60" text-anchor="middle" class="sub">检索机器人 Scout · 八个模块插槽，插哪个用哪个，业务代码一行不改</text>
+
+  
+  <ellipse cx="250" cy="374" rx="120" ry="8" fill="#64748b" opacity="0.10"/>
+
+  
+
+  
+  <g class="plate">
+    <rect x="202" y="320" width="32" height="40" rx="14"/>
+    <rect x="266" y="320" width="32" height="40" rx="14"/>
+  </g>
+  <g class="part">
+    <rect x="194" y="352" width="48" height="20" rx="10"/>
+    <rect x="258" y="352" width="48" height="20" rx="10"/>
+  </g>
+
+  
+  <rect x="232" y="194" width="36" height="26" rx="9" class="part"/>
+
+  
+  <rect x="158" y="214" width="184" height="120" rx="30" class="body"/>
+
+  
+  <rect x="169" y="229" width="162" height="92" rx="15" class="bay"/>
+
+  
+  <rect x="210" y="235" width="42" height="42" rx="13" class="glow"/>
+  <rect x="210" y="235" width="42" height="42" rx="13" class="ring"/>
+
+  
+  <g class="socket">
+    <rect x="178" y="241" width="30" height="30" rx="7"/>
+    <rect x="216" y="241" width="30" height="30" rx="7"/>
+    <rect x="254" y="241" width="30" height="30" rx="7"/>
+    <rect x="292" y="241" width="30" height="30" rx="7"/>
+    <rect x="178" y="279" width="30" height="30" rx="7"/>
+    <rect x="216" y="279" width="30" height="30" rx="7"/>
+    <rect x="254" y="279" width="30" height="30" rx="7"/>
+    <rect x="292" y="279" width="30" height="30" rx="7"/>
+  </g>
+
+  
+  <rect x="295" y="244" width="24" height="24" rx="5" class="slot-empty"/>
+
+  
+  <use href="#chip" transform="translate(193,256)" fill="#2563eb"/>
+  <use href="#chip" transform="translate(231,256)" fill="#10b981"/>
+  <use href="#chip" transform="translate(269,256)" fill="#93c5fd"/>
+  <use href="#chip" transform="translate(193,294)" fill="#60a5fa"/>
+  <use href="#chip" transform="translate(231,294)" fill="#94a3b8"/>
+  <use href="#chip" transform="translate(269,294)" fill="#fde68a"/>
+  <use href="#chip" transform="translate(307,294)" fill="#3b82f6"/>
+
+  
+  
+  <path class="wire" d="M 250,118 L 250,96"/>
+  <circle cx="250" cy="90" r="7" class="lamp"/>
+
+  <rect x="186" y="118" width="128" height="84" rx="30" class="body"/>
+
+  
+  <circle cx="183" cy="152" r="9" class="part"/>
+  <circle cx="317" cy="152" r="9" class="part"/>
+
+  
+  <rect x="200" y="142" width="100" height="34" rx="17" class="visor"/>
+  <circle cx="226" cy="159" r="7.5" class="eye"/>
+  <circle cx="274" cy="159" r="7.5" class="eye"/>
+  <circle cx="223.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
+  <circle cx="271.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
+  <path d="M 238,186 Q 250,195 262,186" fill="none" stroke="#64748b" stroke-width="2.6" stroke-linecap="round"/>
+
+  
+  
+  <path class="limb-o" d="M 170,246 L 146,296"/>
+  <path class="limb-i" d="M 170,246 L 146,296"/>
+  
+  <path class="limb-o" d="M 332,246 L 370,300"/>
+  <path class="limb-i" d="M 332,246 L 370,300"/>
+
+  
+  <rect x="22" y="284" width="120" height="76" rx="9" class="card"/>
+  <rect x="32" y="296" width="46" height="6" rx="3" class="card-h"/>
+  <rect x="32" y="310" width="88" height="4.5" rx="2.25" class="cl"/>
+  <rect x="32" y="320" width="76" height="4.5" rx="2.25" class="cl-hi"/>
+  <rect x="32" y="330" width="94" height="4.5" rx="2.25" class="cl"/>
+  <rect x="32" y="340" width="62" height="4.5" rx="2.25" class="cl"/>
+
+  <circle cx="143" cy="300" r="11" class="part"/>
+  <circle cx="372" cy="304" r="11" class="part"/>
+
+  
+  <path class="tick" d="M 366,182 L 374,171" opacity="0.55"/>
+  <path class="tick" d="M 371,190 L 379,179" opacity="0.35"/>
+
+  <use href="#chip" transform="translate(350,202) rotate(-14)" fill="#f59e0b"/>
+
+  <path class="arc" d="M 342,220 Q 316,222 310,240"/>
+
+  
+  <rect x="384" y="254" width="150" height="88" rx="11" class="card"/>
+  <rect x="396" y="270" width="54" height="6" rx="3" class="card-h"/>
+  <rect x="396" y="285" width="112" height="5" rx="2.5" class="cl"/>
+  <rect x="396" y="297" width="104" height="5" rx="2.5" class="cl-ok"/>
+  <rect x="396" y="309" width="118" height="5" rx="2.5" class="cl"/>
+  <rect x="396" y="321" width="82" height="5" rx="2.5" class="cl"/>
+
+  <circle cx="528" cy="258" r="13" class="badge"/>
+  <path d="M 521.5,258 L 526.4,264 L 535.6,252" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  
+  <rect x="136" y="402" width="228" height="44" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <g>
+    <rect x="149" y="416" width="7" height="7" rx="2" fill="#2563eb"/>
+    <rect x="158" y="416" width="7" height="7" rx="2" fill="#10b981"/>
+    <rect x="167" y="416" width="7" height="7" rx="2" fill="#93c5fd"/>
+    <rect x="176" y="416" width="7" height="7" rx="2" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <rect x="149" y="425" width="7" height="7" rx="2" fill="#60a5fa"/>
+    <rect x="158" y="425" width="7" height="7" rx="2" fill="#94a3b8"/>
+    <rect x="167" y="425" width="7" height="7" rx="2" fill="#fde68a"/>
+    <rect x="176" y="425" width="7" height="7" rx="2" fill="#3b82f6"/>
+  </g>
+  <text x="198" y="420" class="name">Scout</text>
+  <text x="198" y="437" class="role">检索机器人 · Search Robot</text></g><g class="ex-face"><rect x="200" y="142" width="100" height="34" rx="17" fill="#0F172A"/><ellipse cx="250" cy="189" rx="20" ry="9" fill="#FFFFFF"/><path d="M 218.88,161.1 Q 226,150.38 233.12,161.1" fill="none" stroke="#60A5FA" stroke-width="1.8" stroke-linecap="round"/><path class="ex-anim-pulse" style="animation-delay:0s" d="M 274,161.99 C 265.97,155.85 269.43,150.18 274,155.22 C 278.57,150.18 282.03,155.85 274,161.99 Z" fill="#FF7AA2"/><ellipse cx="250" cy="175.5" rx="3.8" ry="2.97" fill="none" stroke="#64748B" stroke-width="1.7"/><ellipse class="ex-anim-pulse" cx="220.38" cy="169.12" rx="5.85" ry="3.15" fill="#FF8FB3" opacity="0.7"/><ellipse class="ex-anim-pulse" cx="279.62" cy="169.12" rx="5.85" ry="3.15" fill="#FF8FB3" opacity="0.7"/><path class="ex-anim-heart" style="animation-delay:0.0s" d="M 217.6,132.65 C 212.25,128.55 214.56,124.77 217.6,128.13 C 220.64,124.77 222.95,128.55 217.6,132.65 Z" fill="#FF7AA2"/><path class="ex-anim-heart" style="animation-delay:0.7s" d="M 285.1,125.47 C 280.89,122.25 282.71,119.28 285.1,121.92 C 287.49,119.28 289.31,122.25 285.1,125.47 Z" fill="#FF7AA2"/><path class="ex-anim-heart" style="animation-delay:1.3s" d="M 274.3,145.23 C 271.39,143.01 272.65,140.96 274.3,142.78 C 275.95,140.96 277.21,143.01 274.3,145.23 Z" fill="#FF7AA2"/></g></g></svg>
