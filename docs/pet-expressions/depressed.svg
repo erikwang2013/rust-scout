@@ -145,12 +145,12 @@
   <circle cx="317" cy="152" r="9" class="part"/>
 
   
-  <rect x="200" y="142" width="100" height="34" rx="17" class="visor"/>
-  <circle cx="226" cy="159" r="7.5" class="eye"/>
-  <circle cx="274" cy="159" r="7.5" class="eye"/>
-  <circle cx="223.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
-  <circle cx="271.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
-  <path d="M 238,186 Q 250,195 262,186" fill="none" stroke="#64748b" stroke-width="2.6" stroke-linecap="round"/>
+  
+  
+  
+  
+  
+  
 
   
   

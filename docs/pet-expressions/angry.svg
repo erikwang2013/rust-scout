@@ -145,12 +145,12 @@
   <circle cx="317" cy="152" r="9" class="part"/>
 
   
-  <rect x="200" y="142" width="100" height="34" rx="17" class="visor"/>
-  <circle cx="226" cy="159" r="7.5" class="eye"/>
-  <circle cx="274" cy="159" r="7.5" class="eye"/>
-  <circle cx="223.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
-  <circle cx="271.5" cy="156.5" r="2.4" fill="#ffffff" opacity="0.85"/>
-  <path d="M 238,186 Q 250,195 262,186" fill="none" stroke="#64748b" stroke-width="2.6" stroke-linecap="round"/>
+  
+  
+  
+  
+  
+  
 
   
   
@@ -203,4 +203,4 @@
     <rect x="176" y="425" width="7" height="7" rx="2" fill="#3b82f6"/>
   </g>
   <text x="198" y="420" class="name">Scout</text>
-  <text x="198" y="437" class="role">检索机器人 · Search Robot</text></g><g class="ex-face"><rect x="200" y="142" width="100" height="34" rx="17" fill="#0F172A"/><ellipse cx="250" cy="189" rx="20" ry="9" fill="#FFFFFF"/><path d="M 218.88,147.38 L 230.12,151.88" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/><path d="M 281.12,147.38 L 269.88,151.88" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/><ellipse cx="226" cy="159" rx="7.5" ry="4.95" fill="#60A5FA" stroke="#0F172A" stroke-width="1.3"/><ellipse cx="226" cy="159" rx="3.6" ry="2.72" fill="#0F172A"/><circle cx="224.35" cy="157.61" r="1.5" fill="#FFFFFF"/><ellipse cx="274" cy="159" rx="7.5" ry="4.95" fill="#60A5FA" stroke="#0F172A" stroke-width="1.3"/><ellipse cx="274" cy="159" rx="3.6" ry="2.72" fill="#0F172A"/><circle cx="272.35" cy="157.61" r="1.5" fill="#FFFFFF"/><rect x="239.44" y="171.72" width="21.12" height="7.29" rx="1.51" fill="#FFFFFF" stroke="#64748B" stroke-width="1.36"/><path d="M 243.66,171.72 L 243.66,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 247.89,171.72 L 247.89,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 252.11,171.72 L 252.11,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 256.34,171.72 L 256.34,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 239.44,175.5 L 260.56,175.5" stroke="#64748B" stroke-width="1" opacity=".55"/><g class="ex-anim-pulse"><path d="M 281.05,130.05 L 282.49,134.61 L 287.05,136.05 L 282.49,137.49 L 281.05,142.05 L 279.61,137.49 L 275.05,136.05 L 279.61,134.61 Z" fill="#EF4444"/></g><g transform="translate(247.56 121.88)"><circle class="ex-anim-steam" style="animation-delay:0.0s" r="2.68" fill="#D7DEE8" opacity=".72"/></g><g transform="translate(250 120.17)"><circle class="ex-anim-steam" style="animation-delay:0.28s" r="3.41" fill="#D7DEE8" opacity=".72"/></g><g transform="translate(252.44 122.12)"><circle class="ex-anim-steam" style="animation-delay:0.56s" r="2.44" fill="#D7DEE8" opacity=".72"/></g><circle class="ex-anim-pulse" cx="250" cy="159" r="40.5" fill="none" stroke="#EF4444" stroke-width="3.65" opacity=".35"/></g></g></svg>
+  <text x="198" y="437" class="role">检索机器人 · Search Robot</text></g><g class="ex-face"><rect x="200" y="142" width="100" height="34" rx="17" fill="#0F172A"/><ellipse cx="250" cy="189" rx="20" ry="9" fill="#FFFFFF"/><path d="M 218.88,147.38 L 230.12,151.88" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/><path d="M 281.12,147.38 L 269.88,151.88" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/><ellipse cx="226" cy="159" rx="7.5" ry="4.95" fill="#60A5FA" stroke="#0F172A" stroke-width="1.3"/><ellipse cx="226" cy="159" rx="3.6" ry="2.72" fill="#0F172A"/><circle cx="224.35" cy="157.61" r="1.5" fill="#FFFFFF"/><ellipse cx="274" cy="159" rx="7.5" ry="4.95" fill="#60A5FA" stroke="#0F172A" stroke-width="1.3"/><ellipse cx="274" cy="159" rx="3.6" ry="2.72" fill="#0F172A"/><circle cx="272.35" cy="157.61" r="1.5" fill="#FFFFFF"/><rect x="239.44" y="171.72" width="21.12" height="7.29" rx="1.51" fill="#FFFFFF" stroke="#64748B" stroke-width="1.36"/><path d="M 243.66,171.72 L 243.66,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 247.89,171.72 L 247.89,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 252.11,171.72 L 252.11,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 256.34,171.72 L 256.34,179.01" stroke="#64748B" stroke-width="1" opacity=".55"/><path d="M 239.44,175.5 L 260.56,175.5" stroke="#64748B" stroke-width="1" opacity=".55"/><g class="ex-anim-pulse"><path d="M 281.05,130.05 L 282.49,134.61 L 287.05,136.05 L 282.49,137.49 L 281.05,142.05 L 279.61,137.49 L 275.05,136.05 L 279.61,134.61 Z" fill="#EF4444"/></g><g transform="translate(247.56 121.88)"><circle class="ex-anim-steam" style="animation-delay:0.0s" r="2.68" fill="#D7DEE8" opacity=".72"/></g><g transform="translate(250 120.17)"><circle class="ex-anim-steam" style="animation-delay:0.28s" r="3.41" fill="#D7DEE8" opacity=".72"/></g><g transform="translate(252.44 122.12)"><circle class="ex-anim-steam" style="animation-delay:0.56s" r="2.44" fill="#D7DEE8" opacity=".72"/></g></g></g></svg>
