@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 470" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="petTitle petDesc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 470" font-family="system-ui, sans-serif" role="img" aria-labelledby="petTitle petDesc">
   <title id="petTitle">rust-scout 프로젝트 펫: 검색 로봇 Scout</title>
   <desc id="petDesc">작은 검색 로봇. 둥근 모서리의 네모난 머리, 어두운 바이저 안에 파란 둥근 눈 두 개와 그 아래 미소 호선; 머리 위에는 안테나 하나가 호박색 표시등을 이고 있고, 양볼에는 둥근 스터드가 하나씩. 흰색 둥근 몸통, 굵은 다리 둘, 둥근 발 둘, 바닥 그림자 위에 서 있다. 가슴 전체가 모듈 베이로, 어두운 소켓 여덟 개가 4×2로 놓인다. 오른쪽 위 하나는 비어 있고 그 안에 호박색 점선 자리 표시가 남아 있다. 나머지 일곱 개에는 각각 다른 색 모듈이 꽂혀 있다. 진한 파랑, 초록, 연한 파랑, 중간 파랑, 회색, 연한 호박색, 파랑. 빈 소켓 바깥에는 호박색 모듈이 살짝 기울어 떠 있고, 뒤로 속도선 두 줄, 그곳에서 빈 소켓으로 점선 호가 휘어 들어간다. 지금 막 삽입되는 중이다. 빈 소켓 왼쪽의 초록 소켓에는 초록 빛 고리가 켜져 있다. 이번 쿼리에 맞은 드라이버다. 왼팔은 늘어져 쿼리 카드를 받치고, 카드의 네 줄은 체인 SearchBuilder이며 둘째 줄이 브랜드 파랑으로 표시된다. 오른팔은 몸 옆에 늘어져 손바닥이 결과 패널 쪽으로 열려 있다. 화면 오른쪽 결과 패널에는 네 개의 적중이 나열되고 하나가 초록으로 강조되며, 오른쪽 위 모서리에 초록 체크 배지가 얹혀 있다. 아래는 명패: Scout · 검색 로봇.</desc>
 

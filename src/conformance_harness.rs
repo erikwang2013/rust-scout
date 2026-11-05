@@ -231,7 +231,7 @@ impl Harness {
             // 就成了掷骰子。
             let path = temp_db_path(_tag);
             let url = format!("sqlite://{}?mode=rwc", path.display());
-            let engine = crate::DatabaseEngine::new(&url, Vec::new()).expect("临时 sqlite 路径");
+            let engine = crate::DatabaseEngine::new(&url).expect("临时 sqlite 路径");
             subjects.push(Subject::new("database", engine, true, Caps::default()));
             db_files.push(path);
         }

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 840" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="archTitle">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 840" font-family="system-ui, sans-serif" role="img" aria-labelledby="archTitle">
   <title id="archTitle">rust-scout 아키텍처: 애플리케이션 / 데이터 계약 / 코어 / 드라이버 / 스토리지 계층</title>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -27,7 +27,7 @@
       .db    { fill: #d97706; }
       .tcp   { fill: #8b5cf6; }
       .null  { fill: #64748b; }
-      .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .mono  { font-family: ui-monospace, monospace; }
     </style>
   </defs>
 

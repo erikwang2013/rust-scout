@@ -1,13 +1,10 @@
-//! XunSearch（xunsearchd 1.4.x）原生二进制 TCP 协议的纯函数部分：封包/解包、
-//! 字段方案（ini 解析 + 缺省动态方案）。网络 I/O 见 [`crate::xunsearch_engine`]。
+//! XunSearch（xunsearchd 1.4.x）原生二进制 TCP 协议的纯函数部分：封包、
+//! 字段方案（ini 解析 + 缺省动态方案）。网络 I/O 与解包见 [`crate::xunsearch_engine`]。
 //!
 //! 协议（对照 PHP SDK XSServer.class.php / xs_cmd.h）：每个包 = 8 字节头
 //! （cmd u8、arg1 u8、arg2 u8、blen1 u8、blen u32le）+ buf + buf1
 //! （buf 在前 buf1 在后）。cmd 0-127 收响应；>=128 为静默命令（不回包），
 //! 客户端须与下一条普通命令同一次 write 发出。
-#![allow(dead_code)] // 协议常量/纯函数：parse_packet、CMD_INDEX_EXDATA、CMD_DELETE_PROJECT、
-                     // OK_PROJECT_DEL 仅被本模块测试消费（引擎侧走直接的 socket 读写）
-
 use std::collections::HashMap;
 
 use crate::document::SearchDocument;
@@ -17,9 +14,7 @@ pub const CMD_USE: u8 = 1;
 pub const CMD_INDEX_SET_DB: u8 = 32; // 搜索端口同号（CMD_SEARCH_SET_DB）
 pub const CMD_INDEX_SUBMIT: u8 = 34;
 pub const CMD_INDEX_REMOVE: u8 = 35;
-pub const CMD_INDEX_EXDATA: u8 = 36; // 批量：buf 为多条完整命令序列，一次应答
 pub const CMD_INDEX_CLEAN_DB: u8 = 37; // 清空当前库
-pub const CMD_DELETE_PROJECT: u8 = 38; // 删除整个项目（rm -rf 语义，引擎禁用）
 pub const CMD_INDEX_COMMIT: u8 = 39;
 pub const CMD_SEARCH_GET_RESULT: u8 = 66;
 pub const CMD_OK: u8 = 128;
@@ -44,7 +39,6 @@ pub const OK_RESULT_END: u16 = 207;
 pub const OK_RQST_FINISHED: u16 = 250;
 pub const OK_DB_CHANGED: u16 = 251;
 pub const OK_DB_CLEAN: u16 = 253;
-pub const OK_PROJECT_DEL: u16 = 255;
 pub const OK_DB_COMMITED: u16 = 256;
 
 // —— 字段/索引标志 ——
@@ -67,24 +61,6 @@ pub fn pack_cmd(cmd: u8, arg1: u8, arg2: u8, buf: &[u8], buf1: &[u8]) -> Vec<u8>
     out.extend_from_slice(buf);
     out.extend_from_slice(buf1);
     out
-}
-
-/// 解包：返回 (cmd, arg, buf, buf1)；数据不足 8 字节或长度不符返回 None。
-pub fn parse_packet(data: &[u8]) -> Option<(u8, u16, &[u8], &[u8])> {
-    if data.len() < 8 {
-        return None;
-    }
-    let blen1 = data[3] as usize;
-    let blen = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
-    if 8 + blen + blen1 > data.len() {
-        return None;
-    }
-    Some((
-        data[0],
-        (u16::from(data[1]) << 8) | u16::from(data[2]),
-        &data[8..8 + blen],
-        &data[8 + blen..8 + blen + blen1],
-    ))
 }
 
 /// JSON 值 → 协议值字节（数值/布尔用其字符串形式；对象/数组/空用空串）。

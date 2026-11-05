@@ -107,7 +107,6 @@ rust-scout/
 └── docs/
     ├── svg/                # mascota + diagramas de arquitectura / funcionalidades / diseño / ciclo de vida
     ├── i18n/               # README y SVG correspondientes en 12 idiomas
-    ├── coin/               # códigos QR de donación
     └── superpowers/specs/  # documentos de diseño
 ```
 
@@ -317,7 +316,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | TCP nativo | Completo |
 | Null (pruebas/sin búsqueda) | `null` | `null` | — | Completo |
 
-Los constructores de configuración de los demás motores están en [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
+Los constructores de configuración de los demás motores están en [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
 > En el motor SQLite (`database`), `total` es el número de hits **tras el filtrado**, igual
 > que en `CollectionEngine`: SQL solo hace el índice + prefiltro LIKE (traer los candidatos);
@@ -337,7 +336,6 @@ El `EngineManager` lee estas claves de `ScoutConfig::insert` (o escritas directa
 | `typesense.host` / `typesense.api_key` | Typesense | el host por defecto es `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | ambas obligatorias |
 | `database.url` | SQLite | obligatoria |
-| `database.fields` | SQLite | **ya no participa en la búsqueda**, se conserva solo por compatibilidad (y está condenada a desaparecer en la próxima versión rupturista). Antes restringía la búsqueda de texto a los campos listados, lo que hacía que `database` discrepara de la base en memoria (`collection`) ante la misma entrada (`fields=["title"]` + documento `{"title":"Rust","tag":"async"}` + consulta `"async"` → database 0 hits, collection 1); ahora la coincidencia abarca el documento entero. Un array vacío y omitir la clave se comportan igual |
 | `xunsearch.host` | XunSearch | por defecto `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | por defecto `default` |
 | `xunsearch.ini` | XunSearch | ruta del ini del esquema de campos. Sin él `create_index` devuelve `Unsupported` y los vno de los campos solo pueden adivinarse dinámicamente, así que conviene configurarlo |
@@ -464,48 +462,6 @@ Si este proyecto te resulta útil, puedes apoyarlo con una donación ☕ — ¡t
 <img src="../../../docs/alipay.png" alt="Donación por Alipay" width="130"/>
 
 Escanea con WeChat · Escanea con Alipay
-
-### Donaciones en Criptomonedas
-
-| Red | Dirección de cartera | Código QR |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### Transferencias Globales (Transferencia Bancaria)
-
-**Datos del beneficiario**
-
-- Nombre del beneficiario: WANG KEXUN
-- Número de cuenta: 881015918251
-
-**Banco receptor (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- Nombre del banco: ZA Bank Limited
-- Código de banco: 387
-- Dirección del banco: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> La información del banco corresponsal (banco intermediario) que sigue es para remesas transfronterizas, no es la del banco receptor. Consulta con el banco emisor si es necesario aportarla.
-
-- El banco corresponsal para remesas en HKD, CNY y USD es **Citibank**:
-  - Nombre del banco: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - Código de banco: 006 / Código de sucursal: 391
-  - Nombre de la sucursal: Hong Kong Branch
-  - Dirección del banco: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- El banco corresponsal para remesas en otras divisas es **BNY Mellon**:
-  - Nombre del banco: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - Dirección del banco: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## Licencia
 

@@ -113,7 +113,6 @@ rust-scout/
 └── docs/
     ├── svg/                # питомец + схемы архитектуры / функций / дизайна / жизненного цикла
     ├── i18n/               # README и соответствующие SVG для 12 языков
-    ├── coin/               # QR-коды для донатов
     └── superpowers/specs/  # проектные документы
 ```
 
@@ -322,7 +321,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | Родной TCP | Полный |
 | Null (тесты / отключение поиска) | `null` | `null` | — | Полный |
 
-Конструкторы конфигурации остальных движков описаны на [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
+Конструкторы конфигурации остальных движков описаны на [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
 > В движке SQLite (`database`) `total` — это число попаданий **после фильтрации** (как в
 > `CollectionEngine`): SQL лишь выполняет индекс + грубый отбор LIKE, чтобы взять кандидатов,
@@ -341,7 +340,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | host по умолчанию `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | оба обязательны |
 | `database.url` | SQLite | обязателен |
-| `database.fields` | SQLite | **больше не участвует в поиске**, оставлен только ради совместимости (и намечен на удаление в следующем мажорном релизе). Раньше он ограничивал текстовый поиск перечисленными полями, из-за чего `database` расходился с базовым движком в памяти (`collection`) на одном и том же входе (`fields=["title"]` + документ `{"title":"Rust","tag":"async"}` + запрос `"async"` → database 0 попаданий, collection 1); теперь в сопоставлении участвует весь документ. Пустой массив и отсутствие ключа ведут себя одинаково |
 | `xunsearch.host` | XunSearch | по умолчанию `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | по умолчанию `default` |
 | `xunsearch.ini` | XunSearch | путь к ini схемы полей. Без него `create_index` возвращает `Unsupported`, а vno полей приходится угадывать динамически, поэтому его лучше задать |
@@ -468,48 +466,6 @@ eprintln!("{}", pet::format_error(&err));
 <img src="../../../docs/alipay.png" alt="Донат через Alipay" width="130"/>
 
 Сканируйте в WeChat · Сканируйте в Alipay
-
-### Донат в криптовалюте
-
-| Сеть | Адрес кошелька | QR-код |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### Переводы по всему миру (банковский перевод)
-
-**Данные получателя**
-
-- Имя получателя: WANG KEXUN
-- Номер счёта получателя: 881015918251
-
-**Банк-получатель (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- Название банка: ZA Bank Limited
-- Код банка: 387
-- Адрес банка: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> Информация о банке-корреспонденте ниже относится к трансграничным переводам, а не к банку-получателю. Уточните в банке-отправителе, требуется ли её указывать.
-
-- Банк-корреспондент для переводов в гонконгских долларах, юанях и долларах США — **Citibank**:
-  - Название банка: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - Код банка: 006 / Код отделения: 391
-  - Название отделения: Hong Kong Branch
-  - Адрес банка: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- Банк-корреспондент для переводов в других валютах — **BNY Mellon**:
-  - Название банка: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - Адрес банка: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## Лицензия
 

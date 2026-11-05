@@ -109,7 +109,6 @@ rust-scout/
 └── docs/
     ├── svg/                # 프로젝트 펫 + 아키텍처 / 기능 / 설계 / 라이프사이클 그림
     ├── i18n/               # 12개 언어의 README 와 대응 SVG
-    ├── coin/               # 후원 QR 코드
     └── superpowers/specs/  # 설계 문서
 ```
 
@@ -316,7 +315,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | 네이티브 TCP | 완전 |
 | Null(테스트 / 검색 비활성화) | `null` | `null` | — | 완전 |
 
-나머지 엔진의 설정 생성자는 [docs.rs](https://docs.rs/rust-scout) 참고: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
+나머지 엔진의 설정 생성자는 [docs.rs](https://docs.rs/rust-scout) 참고: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
 > SQLite 엔진(`database`)의 `total` 은 **필터 후** 히트 수이며(`CollectionEngine` 과 일치):
 > SQL 은 색인 + LIKE 1차 필터로 후보를 가져올 뿐이고, wheres / 소프트 삭제 / 정렬 / 페이징은
@@ -335,7 +334,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | host 기본값 `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | 둘 다 필수 |
 | `database.url` | SQLite | 필수 |
-| `database.fields` | SQLite | **더 이상 검색에 관여하지 않는다**. 호환성을 위해서만 남겨 두었고 다음 파괴적 릴리스에서 제거될 예정이다. 예전에는 텍스트 검색을 나열한 필드로 제한했기 때문에 같은 입력에서도 `database` 가 메모리 기준(`collection`)과 다른 답을 냈다(`fields=["title"]` + 문서 `{"title":"Rust","tag":"async"}` + 쿼리 `"async"` → database 0건, collection 1건). 이제는 문서 전체가 대조 대상이다. 빈 배열을 넘기는 것과 키를 아예 생략하는 것은 같다 |
 | `xunsearch.host` | XunSearch | 기본 `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | 기본 `default` |
 | `xunsearch.ini` | XunSearch | 필드 스키마 ini 의 경로. 설정하지 않으면 `create_index` 가 `Unsupported` 를 반환하고 필드 vno 는 동적으로 추측할 수밖에 없으므로, 설정해 두는 편이 좋다 |
@@ -458,48 +456,6 @@ eprintln!("{}", pet::format_error(&err));
 <img src="../../../docs/alipay.png" alt="Alipay 후원" width="130"/>
 
 WeChat 스캔 · Alipay 스캔
-
-### 가상화폐 후원
-
-| 메인넷 | 지갑 주소 | QR 코드 |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### 해외 송금(은행 이체)
-
-**수취인 정보**
-
-- 수취인 이름: WANG KEXUN
-- 수취 계좌 번호: 881015918251
-
-**수취 은행(ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- 은행 이름: ZA Bank Limited
-- 은행 번호: 387
-- 은행 주소: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> 아래는 국경 간 송금의 대리 은행(중계 은행) 정보이며, 수취 은행 정보가 아니다. 필요한지 여부는 송금하는 은행에 문의하시기 바란다.
-
-- 홍콩 달러, 위안화, 미국 달러 입금 시 대리 은행은 **Citibank**:
-  - 은행 이름: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - 은행 번호: 006 / 지점 번호: 391
-  - 지점 이름: Hong Kong Branch
-  - 은행 주소: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- 그 외 통화 입금 시 대리 은행은 **BNY Mellon**:
-  - 은행 이름: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - 은행 주소: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## 라이선스
 

@@ -113,7 +113,6 @@ rust-scout/
 └── docs/
     ├── svg/                # pet + architecture / features / design / lifecycle diagrams
     ├── i18n/               # READMEs and matching SVGs for 12 languages
-    ├── coin/               # donation QR codes
     └── superpowers/specs/  # design documents
 ```
 
@@ -345,7 +344,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | Native TCP | Complete |
 | Null (testing/disabled search) | `null` | `null` | — | Complete |
 
-Config constructors for the remaining engines are documented on [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
+Config constructors for the remaining engines are documented on [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
 > `ScoutConfig`'s `Debug` redacts secrets: in `options`, `*.api_key` / `*secret*` /
 > `*password*` / `*token` all render as `"<redacted>"`, so `println!("{:?}", config)`
@@ -367,7 +366,6 @@ Keys in `ScoutConfig::insert` (or written straight into `options`) are read by `
 | `typesense.host` / `typesense.api_key` | Typesense | host defaults to `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | both required |
 | `database.url` | SQLite | required |
-| `database.fields` | SQLite | **no longer participates in search**, kept only for backward compatibility (and slated for removal in the next breaking release). It used to restrict text search to the listed fields, which made `database` disagree with the in-memory baseline (`collection`) on the same input (`fields=["title"]` + doc `{"title":"Rust","tag":"async"}` + query `"async"` → database 0 hits, collection 1); matching now covers the whole document. An empty array and omitting the key behave the same |
 | `xunsearch.host` | XunSearch | defaults to `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | defaults to `default` |
 | `xunsearch.ini` | XunSearch | path to the field-scheme ini. Without it `create_index` returns `Unsupported` and field vnos can only be guessed dynamically, so configuring it is recommended |
@@ -478,48 +476,6 @@ If this project helps you, feel free to support it with a donation ☕ — your 
 <img src="../../../docs/alipay.png" alt="支付宝打赏" width="130"/>
 
 Scan with WeChat · Scan with Alipay
-
-### Crypto Donations
-
-| Network | Wallet Address | QR Code |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### Global Transfers (Bank Transfer)
-
-**Payee Information**
-
-- Payee Name: WANG KEXUN
-- Account Number: 881015918251
-
-**Receiving Bank (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- Bank Name: ZA Bank Limited
-- Bank Code: 387
-- Bank Address: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> The correspondent bank (intermediary bank) information below is for cross-border remittances, not the receiving bank's information. Please ask the remitting bank whether it is required.
-
-- The correspondent bank for remittances in HKD, CNY and USD is **Citibank**:
-  - Bank Name: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - Bank Code: 006 / Branch Code: 391
-  - Branch Name: Hong Kong Branch
-  - Bank Address: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- The correspondent bank for remittances in other currencies is **BNY Mellon**:
-  - Bank Name: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - Bank Address: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## License
 

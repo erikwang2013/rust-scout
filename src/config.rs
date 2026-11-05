@@ -110,11 +110,10 @@ impl ScoutConfig {
         config
     }
 
-    pub fn database(url: impl Into<String>, fields: Vec<String>) -> Self {
+    pub fn database(url: impl Into<String>) -> Self {
         let mut config = Self::collection();
         config.driver = "database".to_string();
         config.insert("database.url", url.into());
-        config.insert("database.fields", serde_json::json!(fields));
         config
     }
 

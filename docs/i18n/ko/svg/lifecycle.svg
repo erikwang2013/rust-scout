@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 640" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="lifeTitle">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 640" font-family="system-ui, sans-serif" role="img" aria-labelledby="lifeTitle">
   <title id="lifeTitle">색인과 문서 라이프사이클: 생성 / 쓰기 / 갱신 / 검색 / 삭제 / 재구축 / 파괴</title>
   <defs>
     <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -16,7 +16,7 @@
       .cell  { font-size: 10.5px; fill: #334155; }
       .rowlb { font-size: 11px; font-weight: 600; fill: #0f172a; }
       .lbl   { font-size: 12px; fill: #64748b; font-weight: 600; }
-      .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .mono  { font-family: ui-monospace, monospace; }
     </style>
   </defs>
 

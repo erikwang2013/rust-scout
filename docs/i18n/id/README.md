@@ -112,7 +112,6 @@ rust-scout/
 └── docs/
     ├── svg/                # hewan peliharaan + diagram arsitektur / fitur / desain / siklus hidup
     ├── i18n/               # README dan SVG terkait untuk 12 bahasa
-    ├── coin/               # kode QR donasi
     └── superpowers/specs/  # dokumen desain
 ```
 
@@ -322,7 +321,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | TCP asli | Lengkap |
 | Null (pengujian / menonaktifkan pencarian) | `null` | `null` | — | Lengkap |
 
-Konstruktor konfigurasi mesin lainnya ada di [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
+Konstruktor konfigurasi mesin lainnya ada di [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`.
 
 > Pada mesin SQLite (`database`), `total` adalah jumlah hit **setelah penyaringan** (sama dengan
 > `CollectionEngine`): SQL hanya menjalankan indeks + saring kasar LIKE untuk mengambil kandidat,
@@ -341,7 +340,6 @@ Kunci di `ScoutConfig::insert` (atau yang ditulis langsung ke `options`) dibaca 
 | `typesense.host` / `typesense.api_key` | Typesense | host bawaan `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | keduanya wajib |
 | `database.url` | SQLite | wajib |
-| `database.fields` | SQLite | **tidak lagi ikut serta dalam pencarian**, disimpan hanya demi kompatibilitas (dan dijadwalkan dihapus pada rilis perusak berikutnya). Dulu ia membatasi pencarian teks pada field yang didaftarkan, sehingga `database` berbeda dari basis in-memory (`collection`) untuk masukan yang sama (`fields=["title"]` + dokumen `{"title":"Rust","tag":"async"}` + kueri `"async"` → database 0 hit, collection 1); kini seluruh dokumen ikut dicocokkan. Array kosong dan menghilangkan kunci ini berperilaku sama |
 | `xunsearch.host` | XunSearch | bawaan `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | bawaan `default` |
 | `xunsearch.ini` | XunSearch | jalur ini skema field. Tanpanya `create_index` mengembalikan `Unsupported` dan vno field hanya bisa ditebak secara dinamis, jadi sebaiknya diisi |
@@ -468,48 +466,6 @@ Jika proyek ini bermanfaat bagi Anda, dukunglah dengan donasi ☕ — dukungan A
 <img src="../../../docs/alipay.png" alt="Donasi via Alipay" width="130"/>
 
 Pindai dengan WeChat · Pindai dengan Alipay
-
-### Donasi Kripto
-
-| Jaringan | Alamat Dompet | Kode QR |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### Transfer Global (Transfer Bank)
-
-**Informasi Penerima**
-
-- Nama penerima: WANG KEXUN
-- Nomor rekening penerima: 881015918251
-
-**Bank Penerima (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- Nama bank: ZA Bank Limited
-- Kode bank: 387
-- Alamat bank: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> Informasi bank koresponden (bank perantara) di bawah ini adalah untuk transfer lintas negara, bukan informasi bank penerima. Silakan tanyakan kepada bank pengirim apakah perlu disertakan.
-
-- Bank koresponden untuk transfer dalam HKD, CNY, dan USD adalah **Citibank**:
-  - Nama bank: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - Kode bank: 006 / Kode cabang: 391
-  - Nama cabang: Hong Kong Branch
-  - Alamat bank: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- Bank koresponden untuk transfer dalam mata uang lain adalah **BNY Mellon**:
-  - Nama bank: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - Alamat bank: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## Lisensi
 

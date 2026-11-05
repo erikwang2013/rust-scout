@@ -109,7 +109,6 @@ rust-scout/
 └── docs/
     ├── svg/                # プロジェクトのペット + アーキテクチャ / 機能 / 設計 / ライフサイクル図
     ├── i18n/               # 12 言語の README と対応する SVG
-    ├── coin/               # 投げ銭用 QR コード
     └── superpowers/specs/  # 設計ドキュメント
 ```
 
@@ -316,7 +315,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | ネイティブ TCP | 完全 |
 | Null（テスト / 検索の無効化） | `null` | `null` | — | 完全 |
 
-その他のエンジンの設定コンストラクタは [docs.rs](https://docs.rs/rust-scout) を参照：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
+その他のエンジンの設定コンストラクタは [docs.rs](https://docs.rs/rust-scout) を参照：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
 > SQLite エンジン（`database`）の `total` は**フィルタ後**のヒット数（`CollectionEngine`
 > と一致）：SQL は索引 + LIKE の粗ふるいで候補を取るだけで、wheres / ソフト削除 / ソート /
@@ -335,7 +334,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | host の既定は `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | どちらも必須 |
 | `database.url` | SQLite | 必須 |
-| `database.fields` | SQLite | **検索にはもう関与しない**。互換性のためだけに残しており、次の破壊的リリースで削除予定。以前はテキスト検索を列挙したフィールドだけに限定していたため、同じ入力でも `database` がメモリ側の基準（`collection`）と食い違っていた（`fields=["title"]` + 文書 `{"title":"Rust","tag":"async"}` + クエリ `"async"` → database 0 件、collection 1 件）。現在は文書全体が照合対象になる。空配列を渡すのとキー自体を省くのは同じ |
 | `xunsearch.host` | XunSearch | 既定 `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | 既定 `default` |
 | `xunsearch.ini` | XunSearch | フィールドスキーマ ini のパス。設定しないと `create_index` が `Unsupported` を返し、フィールドの vno は動的な推測に頼るしかないので、設定しておくのが望ましい |
@@ -460,48 +458,6 @@ eprintln!("{}", pet::format_error(&err));
 <img src="../../../docs/alipay.png" alt="Alipay 投げ銭" width="130"/>
 
 WeChat でスキャン · Alipay でスキャン
-
-### 仮想通貨での投げ銭
-
-| メインネット | ウォレットアドレス | QR コード |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### 海外送金（銀行振込）
-
-**受取人情報**
-
-- 受取人名：WANG KEXUN
-- 受取口座番号：881015918251
-
-**受取銀行（ZA Bank）**
-
-- SWIFT Code：`AABLHKHHXXX`
-- 銀行名：ZA Bank Limited
-- 銀行番号：387
-- 銀行住所：Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> 以下は越境送金の代理銀行（中継銀行）の情報であり、受取銀行の情報ではない。必要かどうかは送金元の銀行に確認すること。
-
-- 香港ドル、人民元、米ドルの入金時の代理銀行は **Citibank**：
-  - 銀行名：Citibank N.A. Hong Kong
-  - SWIFT Code：`CITIHKHXXXX`
-  - 銀行番号：006 / 支店番号：391
-  - 支店名：Hong Kong Branch
-  - 銀行住所：Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- その他の通貨の入金時の代理銀行は **BNY Mellon**：
-  - 銀行名：THE BANK OF NEW YORK MELLON
-  - SWIFT Code：`IRVTUS3NXXX`
-  - 銀行住所：THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## ライセンス
 

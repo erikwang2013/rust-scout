@@ -1,17 +1,13 @@
     use super::*;
 
-    async fn engine_with(searchable_fields: Vec<String>) -> DatabaseEngine {
+    async fn engine() -> DatabaseEngine {
         // 内存库每个连接是独立的，锁死单连接保证共享同一库。
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        DatabaseEngine::from_pool(pool, searchable_fields)
-    }
-
-    async fn engine() -> DatabaseEngine {
-        engine_with(vec!["title".to_string(), "body".to_string()]).await
+        DatabaseEngine::from_pool(pool)
     }
 
     fn doc(id: &str, index: Option<&str>, fields: serde_json::Value) -> SearchDocument {
@@ -361,14 +357,10 @@
     }
 
     #[tokio::test]
-    async fn searchable_fields_must_not_narrow_what_text_search_covers() {
+    async fn text_search_covers_whole_document_like_collection() {
         // 回归：粗筛只需是内存 matches() 的**超集**，但它必须是超集 —— 漏掉
         // matches() 本会保留的行，就是静默的错误答案。
-        //
-        // 曾经 `searchable` 列只拼「配置字段的值」，而 matches() 搜的是整份序列化
-        // 文档，于是下面这个场景 database 返回 0 条、collection 返回 1 条 ——
-        // 同一份文档、同一个查询，两个驱动两个答案。
-        let e = engine_with(vec!["title".to_string()]).await;
+        let e = engine().await;
         let reference = crate::CollectionEngine::new();
         let d = doc(
             "one",
@@ -392,33 +384,6 @@
             );
             assert_eq!(db.total, 1, "查询 {q:?} 本该命中");
         }
-    }
-
-    #[tokio::test]
-    async fn text_query_works_without_configured_searchable_fields() {
-        // `database.fields` 没配时 searchable_fields 是空 Vec（README 里没有任何一处
-        // 提到这个键，所以这是默认路径），而 `searchable` 列由 write_all 按
-        // searchable_fields 拼出 —— 空配置下整列恒为 ""，`searchable LIKE '%q%'`
-        // 一条都匹配不上，于是**每个文本查询都静默返回 0 条**。跳过空预筛退回内存
-        // 匹配：慢，但答案是对的。
-        let e = engine_with(Vec::new()).await;
-        let docs = [
-            doc("one", Some("books"), serde_json::json!({"title": "Hello world"})),
-            doc("two", Some("books"), serde_json::json!({"title": "Goodbye"})),
-        ];
-        e.update(&docs).await.unwrap();
-
-        let builder = SearchBuilder::new("hello").within("books");
-        let got = e.search(&builder).await.unwrap();
-        assert_eq!(got.total, 1, "没配 searchable_fields 不是「搜不到」");
-        assert_eq!(got.hits[0].id, "one");
-
-        // 同一个输入，两个进程内驱动必须同答案
-        let reference = crate::CollectionEngine::new();
-        reference.update(&docs).await.unwrap();
-        let want = reference.search(&builder).await.unwrap();
-        assert_eq!(got.total, want.total);
-        assert_eq!(got.hits[0].id, want.hits[0].id);
     }
 
     #[tokio::test]
@@ -574,7 +539,7 @@
     async fn reserved_index_name_is_rejected_before_any_database_access() {
         // 校验必须排在 ensure_schema / 取连接之前：后端不可用时（这个路径不存在，
         // 连接在第一次查询时才失败）也要给 InvalidIndexName，而不是 I/O 错误。
-        let e = DatabaseEngine::new("sqlite:///nonexistent-dir-rust-scout/db.sqlite", Vec::new())
+        let e = DatabaseEngine::new("sqlite:///nonexistent-dir-rust-scout/db.sqlite")
             .expect("connect_lazy 不在构造时建连");
         for err in [
             e.search(&SearchBuilder::new("q").within("_all"))

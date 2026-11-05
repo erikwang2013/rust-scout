@@ -105,7 +105,6 @@ rust-scout/
 └── docs/
     ├── svg/                # पेट + वास्तुकला / सुविधा / डिज़ाइन / जीवनचक्र आरेख
     ├── i18n/               # 12 भाषाओं के README और उनके SVG
-    ├── coin/               # दान QR कोड
     └── superpowers/specs/  # डिज़ाइन दस्तावेज़
 ```
 
@@ -314,7 +313,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | मूल TCP | पूर्ण |
 | Null (परीक्षण/खोज अक्षम) | `null` | `null` | — | पूर्ण |
 
-बाकी इंजनों के कॉन्फ़िगरेशन कंस्ट्रक्टर [docs.rs](https://docs.rs/rust-scout) पर देखें: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
+बाकी इंजनों के कॉन्फ़िगरेशन कंस्ट्रक्टर [docs.rs](https://docs.rs/rust-scout) पर देखें: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
 
 > SQLite इंजन (`database`) में `total` **फ़िल्टर के बाद** की हिट-गिनती है — ठीक `CollectionEngine`
 > की तरह: SQL केवल इंडेक्स + LIKE का रूखा पास चलाकर उम्मीदवार लाता है, और wheres / सॉफ़्ट डिलीट /
@@ -333,7 +332,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | host का डिफ़ॉल्ट `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | दोनों अनिवार्य |
 | `database.url` | SQLite | अनिवार्य |
-| `database.fields` | SQLite | **अब खोज में भाग नहीं लेता**, केवल संगतता के लिए रखा गया है (और अगले ब्रेकिंग रिलीज़ में हटाने के लिए तय)। पहले यह टेक्स्ट खोज को सूचीबद्ध फ़ील्ड तक सीमित करता था, जिससे एक ही इनपुट पर `database` मेमोरी आधार (`collection`) से अलग नतीजा देता था (`fields=["title"]` + दस्तावेज़ `{"title":"Rust","tag":"async"}` + क्वेरी `"async"` → database 0 हिट, collection 1); अब पूरा दस्तावेज़ मिलान में शामिल है। ख़ाली ऐरे देना और कुंजी छोड़ देना एक जैसा है |
 | `xunsearch.host` | XunSearch | डिफ़ॉल्ट `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | डिफ़ॉल्ट `default` |
 | `xunsearch.ini` | XunSearch | फ़ील्ड-स्कीमा ini का पथ। इसके बिना `create_index` `Unsupported` लौटाता है और फ़ील्ड vno केवल गतिशील अनुमान से तय होते हैं, इसलिए इसे सेट करना बेहतर है |
@@ -459,49 +457,6 @@ eprintln!("{}", pet::format_error(&err));
 <img src="../../../docs/alipay.png" alt="अलीपे दान" width="130"/>
 
 वीचैट से स्कैन करें · अलीपे से स्कैन करें
-
-### क्रिप्टोकरेंसी दान
-
-| नेटवर्क | वॉलेट पता | QR कोड |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### वैश्विक स्थानांतरण (बैंक रेमिटेंस)
-
-**प्राप्तकर्ता की जानकारी**
-
-- प्राप्तकर्ता का नाम: WANG KEXUN
-- खाता संख्या: 881015918251
-
-**प्राप्तकर्ता बैंक (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- बैंक का नाम: ZA Bank Limited
-- बैंक कोड: 387
-- बैंक पता: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> नीचे दी गई कॉरेस्पॉन्डेंट बैंक (मध्यस्थ बैंक) जानकारी सीमा-पार रेमिटेंस के लिए है, यह
-> प्राप्तकर्ता बैंक की जानकारी नहीं है। कृपया अपने रेमिटिंग बैंक से पूछें कि यह आवश्यक है या नहीं।
-
-- HKD, CNY और USD में भेजे गए धन के लिए कॉरेस्पॉन्डेंट बैंक **Citibank** है:
-  - बैंक का नाम: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - बैंक कोड: 006 / शाखा कोड: 391
-  - शाखा का नाम: Hong Kong Branch
-  - बैंक पता: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- अन्य मुद्राओं में भेजे गए धन के लिए कॉरेस्पॉन्डेंट बैंक **BNY Mellon** है:
-  - बैंक का नाम: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - बैंक पता: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## लाइसेंस
 

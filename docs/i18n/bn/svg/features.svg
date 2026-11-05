@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="featTitle">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" font-family="system-ui, sans-serif" role="img" aria-labelledby="featTitle">
   <title id="featTitle">rust-scout বৈশিষ্ট্য ডিজাইন: ১২টি সক্ষমতা, সবই এক Engine trait থেকে</title>
   <defs>
     <style>
@@ -7,7 +7,7 @@
       .card  { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
       .name  { font-size: 14px; font-weight: 600; fill: #0f172a; }
       .desc  { font-size: 11px; fill: #475569; }
-      .api   { font-size: 10px; fill: #2563eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .api   { font-size: 10px; fill: #2563eb; font-family: ui-monospace, monospace; }
       .ico   { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.2; }
       .ico-t { font-size: 17px; font-weight: 700; fill: #2563eb; }
       .n     { font-size: 10px; font-weight: 700; fill: #94a3b8; }

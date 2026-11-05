@@ -105,7 +105,6 @@ rust-scout/
 └── docs/
     ├── svg/                # পোষা প্রাণী + আর্কিটেকচার / বৈশিষ্ট্য / ডিজাইন / জীবনচক্র চিত্র
     ├── i18n/               # ১২টি ভাষার README ও সংশ্লিষ্ট SVG
-    ├── coin/               # ডোনেশনের QR কোড
     └── superpowers/specs/  # ডিজাইন ডকুমেন্ট
 ```
 
@@ -314,7 +313,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | নেটিভ TCP | সম্পূর্ণ |
 | Null (টেস্ট/অনুসন্ধান নিষ্ক্রিয়) | `null` | `null` | — | সম্পূর্ণ |
 
-বাকি ইঞ্জিনের কনফিগারেশন কনস্ট্রাক্টর দেখুন [docs.rs](https://docs.rs/rust-scout)-এ: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url, fields)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
+বাকি ইঞ্জিনের কনফিগারেশন কনস্ট্রাক্টর দেখুন [docs.rs](https://docs.rs/rust-scout)-এ: `ScoutConfig::typesense(host, api_key)`, `ScoutConfig::algolia(app_id, api_key)`, `ScoutConfig::database(url)`, `ScoutConfig::null()`, `ScoutConfig::xunsearch(host, project)`।
 
 > SQLite ইঞ্জিনের (`database`) `total` হলো **ফিল্টার-পরবর্তী** হিট-গণনা, ঠিক `CollectionEngine`-এর মতো:
 > SQL শুধু ইনডেক্স + LIKE-এর মোটা পাস চালিয়ে প্রার্থী এনে দেয়, তারপর wheres / সফট ডিলিট /
@@ -333,7 +332,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | host-এর ডিফল্ট `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | দুটোই আবশ্যক |
 | `database.url` | SQLite | আবশ্যক |
-| `database.fields` | SQLite | **এখন আর অনুসন্ধানে অংশ নেয় না**, কেবল সামঞ্জস্যের জন্য রাখা হয়েছে (এবং পরের ব্রেকিং রিলিজে সরানোর কথা)। আগে এটি পাঠ্য অনুসন্ধানকে তালিকাভুক্ত ক্ষেত্রেই সীমিত করত, ফলে একই ইনপুটে `database` ইন-মেমোরি আধার (`collection`) থেকে আলাদা ফল দিত (`fields=["title"]` + ডকুমেন্ট `{"title":"Rust","tag":"async"}` + কুয়েরি `"async"` → database 0 হিট, collection 1); এখন গোটা ডকুমেন্টই মেলানো হয়। খালি অ্যারে পাঠানো আর কী-টি না দেওয়া একই কথা |
 | `xunsearch.host` | XunSearch | ডিফল্ট `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | ডিফল্ট `default` |
 | `xunsearch.ini` | XunSearch | ক্ষেত্র-স্কিমের ini ফাইলের পাথ। না দিলে `create_index` `Unsupported` ফেরায়, আর ক্ষেত্রের vno কেবল গতিশীলভাবে অনুমান করতে হয় — তাই দেওয়াই ভালো |
@@ -457,48 +455,6 @@ eprintln!("{}", pet::format_error(&err));
 <img src="../../../docs/alipay.png" alt="支付宝打赏" width="130"/>
 
 WeChat স্ক্যান · Alipay স্ক্যান
-
-### ক্রিপ্টোকারেন্সি ডোনেশন
-
-| মেইননেট | ওয়ালেট ঠিকানা | QR কোড |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### আন্তর্জাতিক স্থানান্তর (ব্যাংক রেমিট্যান্স)
-
-**প্রাপকের তথ্য**
-
-- প্রাপকের নাম: WANG KEXUN
-- প্রাপকের অ্যাকাউন্ট নম্বর: 881015918251
-
-**প্রাপক ব্যাংক (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- ব্যাংকের নাম: ZA Bank Limited
-- ব্যাংক কোড: 387
-- ব্যাংকের ঠিকানা: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> আন্তঃসীমান্ত রেমিট্যান্সের এজেন্ট ব্যাংকের (মধ্যস্থ ব্যাংক) তথ্য, প্রাপক ব্যাংকের তথ্য নয়। রেমিট্যান্স পাঠানোর ব্যাংকের কাছে জিজ্ঞাসা করুন এটি দেওয়া প্রয়োজন কি না।
-
-- হংকং ডলার, চীনা ইউয়ান ও মার্কিন ডলার পাঠানোর এজেন্ট ব্যাংক **Citibank**:
-  - ব্যাংকের নাম: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - ব্যাংক কোড: 006 / শাখা কোড: 391
-  - শাখার নাম: Hong Kong Branch
-  - ব্যাংকের ঠিকানা: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- অন্য মুদ্রা পাঠানোর সময় এজেন্ট ব্যাংক **BNY Mellon**:
-  - ব্যাংকের নাম: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - ব্যাংকের ঠিকানা: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## লাইসেন্স
 

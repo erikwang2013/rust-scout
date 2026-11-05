@@ -105,7 +105,6 @@ rust-scout/
 └── docs/
     ├── svg/                # الحيوان + مخططات البنية / الميزات / التصميم / دورة الحياة
     ├── i18n/               # ملفات README وSVG المقابلة لها بـ 12 لغة
-    ├── coin/               # رموز QR للتبرعات
     └── superpowers/specs/  # مستندات التصميم
 ```
 
@@ -313,7 +312,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | TCP أصلي | كامل |
 | Null (للاختبار/تعطيل البحث) | `null` | `null` | — | كامل |
 
-أما بواني إعدادات بقية المحركات فهي موثّقة على [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)` و`ScoutConfig::algolia(app_id, api_key)` و`ScoutConfig::database(url, fields)` و`ScoutConfig::null()` و`ScoutConfig::xunsearch(host, project)`.
+أما بواني إعدادات بقية المحركات فهي موثّقة على [docs.rs](https://docs.rs/rust-scout): `ScoutConfig::typesense(host, api_key)` و`ScoutConfig::algolia(app_id, api_key)` و`ScoutConfig::database(url)` و`ScoutConfig::null()` و`ScoutConfig::xunsearch(host, project)`.
 
 > في محرك SQLite (`database`) يكون `total` **عدد الإصابات بعد التصفية**، تمامًا كما في
 > `CollectionEngine`: لا ينفّذ SQL إلا الفهرس + تمريرة LIKE الخشنة لجلب المرشّحين، ثم تجري
@@ -332,7 +331,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | الافتراضي للـ host هو `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | كلاهما مطلوب |
 | `database.url` | SQLite | مطلوب |
-| `database.fields` | SQLite | **لم يعد يشارك في البحث**، ولا يُحتفظ به إلا للتوافق (ومُقرَّر حذفه في الإصدار الكاسر القادم). كان سابقًا يحصر البحث النصي في الحقول المذكورة، فكان `database` يخالف المرجع في الذاكرة (`collection`) على المدخل نفسه (`fields=["title"]` + المستند `{"title":"Rust","tag":"async"}` + الاستعلام `"async"` → database 0 إصابة، collection 1)؛ والآن يشارك المستند كاملًا في المطابقة. وتمرير مصفوفة فارغة أو حذف المفتاح سواء |
 | `xunsearch.host` | XunSearch | الافتراضي `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | الافتراضي `default` |
 | `xunsearch.ini` | XunSearch | مسار ملف ini لمخطط الحقول. وبدونه يُعيد `create_index` القيمة `Unsupported`، ولا يبقى لـ vno الحقول سوى التخمين الديناميكي، لذا يُستحسن ضبطه |
@@ -456,49 +454,6 @@ eprintln!("{}", pet::format_error(&err));
 <img src="../../../docs/alipay.png" alt="تبرع عبر Alipay" width="130"/>
 
 امسح عبر WeChat · امسح عبر Alipay
-
-### التبرعات بالعملات الرقمية
-
-| الشبكة | عنوان المحفظة | رمز QR |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="../../../docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="../../../docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="../../../docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="../../../docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="../../../docs/coin/10.jpg" width="130"/> |
-
-### التحويلات الدولية (حوالة بنكية)
-
-**معلومات المستفيد**
-
-- اسم المستفيد: WANG KEXUN
-- رقم الحساب: 881015918251
-
-**البنك المستلم (ZA Bank)**
-
-- SWIFT Code: `AABLHKHHXXX`
-- اسم البنك: ZA Bank Limited
-- رمز البنك: 387
-- عنوان البنك: Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> معلومات البنك المراسل (الوسيط) أدناه تخصّ التحويلات العابرة للحدود، وليست معلومات البنك
-> المستلم. يُرجى سؤال البنك المحوِّل عمّا إذا كانت مطلوبة.
-
-- البنك المراسل للتحويلات بالدولار الهونغ كونغي واليوان الصيني والدولار الأمريكي هو **Citibank**:
-  - اسم البنك: Citibank N.A. Hong Kong
-  - SWIFT Code: `CITIHKHXXXX`
-  - رمز البنك: 006 / رمز الفرع: 391
-  - اسم الفرع: Hong Kong Branch
-  - عنوان البنك: Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- البنك المراسل للتحويلات بالعملات الأخرى هو **BNY Mellon**:
-  - اسم البنك: THE BANK OF NEW YORK MELLON
-  - SWIFT Code: `IRVTUS3NXXX`
-  - عنوان البنك: THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## الرخصة
 

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 470" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="petTitle petDesc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 470" font-family="system-ui, sans-serif" role="img" aria-labelledby="petTitle petDesc">
   <title id="petTitle">rust-scout 项目宠物：检索机器人 Scout</title>
   <desc id="petDesc">一台小检索机器人 Scout。圆角方形脑袋，深色面罩里两只蓝色圆眼，下面一条微笑弧线；头顶一根天线顶着一颗琥珀色指示灯，两颊各一枚圆形耳栓。白色圆角躯干、两条粗腿、两只圆脚掌，站定在地面投影上。胸前整块躯干就是模块舱：八个深色插槽排成 4×2，右上角那一个空着 —— 槽里留着一圈琥珀色虚线落位框 —— 另外七个各插着一枚不同颜色的模块：深蓝、绿、浅蓝、中蓝、灰、浅琥珀、蓝。一枚琥珀色模块悬在空槽外侧、微微倾斜，身后拖着两道速度线，左下角拉出一条虚线弧弯进空槽：这一枚正在插入。空槽左边那枚绿色插槽亮着一圈绿光，是命中这次查询的驱动。左臂垂下托着一张查询卡片，卡上四行是链式 SearchBuilder，第二行用品牌蓝标出；右臂垂在体侧，手掌摊向结果面板。画面右侧那块结果面板列出四条命中，其中一条绿色高亮，面板右上角压着一枚绿色对勾徽章。画面下方是名牌：Scout · 检索机器人。</desc>
 

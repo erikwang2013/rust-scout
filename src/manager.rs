@@ -63,18 +63,7 @@ fn build_engine(config: &ScoutConfig) -> crate::Result<Arc<dyn Engine>> {
                         "database driver requires `database.url` config".to_string(),
                     )
                 })?;
-            let fields = config
-                .get("database.fields")
-                .and_then(|value| value.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            Ok(Arc::new(crate::database_engine::DatabaseEngine::new(
-                url, fields,
-            )?))
+            Ok(Arc::new(crate::database_engine::DatabaseEngine::new(url)?))
         }
         #[cfg(feature = "meilisearch")]
         "meilisearch" => {

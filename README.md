@@ -113,7 +113,6 @@ rust-scout/
 └── docs/
     ├── svg/                # 项目宠物 + 架构 / 功能 / 设计 / 生命周期图
     ├── i18n/               # 12 种语言的 README 与对应 SVG
-    ├── coin/               # 打赏二维码
     └── superpowers/specs/  # 设计文档
 ```
 
@@ -335,7 +334,7 @@ let engine = EngineManager::new(config).engine()?;
 | XunSearch | `xunsearch` | `xunsearch` | 原生 TCP | 完整 |
 | Null（测试/禁用搜索） | `null` | `null` | — | 完整 |
 
-其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url, fields)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
+其余引擎的配置构造器见 [docs.rs](https://docs.rs/rust-scout)：`ScoutConfig::typesense(host, api_key)`、`ScoutConfig::algolia(app_id, api_key)`、`ScoutConfig::database(url)`、`ScoutConfig::null()`、`ScoutConfig::xunsearch(host, project)`。
 
 ### 驱动配置键
 
@@ -349,7 +348,6 @@ let engine = EngineManager::new(config).engine()?;
 | `typesense.host` / `typesense.api_key` | Typesense | host 缺省 `http://127.0.0.1:8108` |
 | `algolia.app_id` / `algolia.api_key` | Algolia | 均必填 |
 | `database.url` | SQLite | 必填 |
-| `database.fields` | SQLite | **已不参与搜索**，仅为兼容保留（待下个 breaking 版本连同构造参数一起删）。早期用它限定文本搜索只覆盖列出的字段，导致 database 与内存基准（`collection`）对同一输入给出不同结果（`fields=["title"]` + 文档 `{"title":"Rust","tag":"async"}` + 查 `"async"` → database 0 条、collection 1 条）；现已改为整份文档参与匹配。传空数组或不传都一样 |
 | `xunsearch.host` | XunSearch | 缺省 `127.0.0.1:8383` |
 | `xunsearch.project` | XunSearch | 缺省 `default` |
 | `xunsearch.ini` | XunSearch | 字段方案 ini 路径。不配则 `create_index` 返回 `Unsupported`、字段 vno 只能动态猜测，建议配上 |
@@ -481,7 +479,7 @@ SVG / PNG）**不是开源资产**，版权归作者所有。未经书面许可�
 用于商业用途；商业使用需取得商业授权，联系 **erik@erik.xyz**。详见
 [ASSETS-LICENSE.md](ASSETS-LICENSE.md)。
 
-> 代码部分仍遵循仓库原有 `LICENSE`；第三方素材（如明确标注的 Go Gopher 等）仍遵循其原许可证。
+> 代码部分仍遵循仓库根目录的 `LICENSE`；第三方素材仍遵循其原许可证。
 <!-- assets-license:end -->
 
 
@@ -495,48 +493,6 @@ SVG / PNG）**不是开源资产**，版权归作者所有。未经书面许可�
 <img src="docs/alipay.png" alt="支付宝打赏" width="130"/>
 
 微信扫码 · 支付宝扫码
-
-### 虚拟币打赏
-
-| 主网 | 钱包地址 | 二维码 |
-|------|----------|--------|
-| BNB Smart Chain (BEP20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/1.jpg" width="130"/> |
-| Tron (TRC20) | `TEdDHWLajt1XvqtPDWmQctdrJaC3pzZZzz` | <img src="docs/coin/2.jpg" width="130"/> |
-| Ethereum (ERC20) | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/3.jpg" width="130"/> |
-| Aptos | `0x836e3780edfc3f7b2372b39e2a1a3a5d7adfaccd96c726f21cfde1b50dd68030` | <img src="docs/coin/4.jpg" width="130"/> |
-| Plasma | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/5.jpg" width="130"/> |
-| Polygon POS | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/6.jpg" width="130"/> |
-| Solana | `2hfhboHdmdrYsY25XfQSsEWxq5ip4EQsR7f4AzSRMUyr` | <img src="docs/coin/7.jpg" width="130"/> |
-| The Open Network (TON) | `UQB9kFQohzmXUir9QSSZq01iwl9aQZIDdBpNmDklljRtCoGK` | <img src="docs/coin/8.jpg" width="130"/> |
-| Arbitrum One | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/9.jpg" width="130"/> |
-| AVAX C-Chain | `0x355d429f97511897ccb4e271ec888205f9ab6629` | <img src="docs/coin/10.jpg" width="130"/> |
-
-### 全球转账（银行汇款）
-
-**收款人信息**
-
-- 收款人姓名：WANG KEXUN
-- 收款账户号码：881015918251
-
-**收款银行（ZA Bank）**
-
-- SWIFT Code：`AABLHKHHXXX`
-- 银行名称：ZA Bank Limited
-- 银行编号：387
-- 银行地址：Core F, Cyberport 3, 100 Cyberport Road, Hong Kong
-
-> 跨境汇款代理银行（中转银行）信息，非收款银行信息。请向汇款银行查询是否需要提供。
-
-- 汇入港元、人民币及美元的代理银行为 **Citibank**：
-  - 银行名称：Citibank N.A. Hong Kong
-  - SWIFT Code：`CITIHKHXXXX`
-  - 银行编号：006 / 分行编号：391
-  - 分行名称：Hong Kong Branch
-  - 银行地址：Citibank Tower, Citibank Plaza, 3 Garden Road, Central, Hong Kong
-- 汇入其他币种时的代理银行为 **BNY Mellon**：
-  - 银行名称：THE BANK OF NEW YORK MELLON
-  - SWIFT Code：`IRVTUS3NXXX`
-  - 银行地址：THE BANK OF NEW YORK MELLON, 240 GREENWICH STREET, NEW YORK, United States
 
 ## 许可证
 

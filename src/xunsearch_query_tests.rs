@@ -18,19 +18,6 @@
     }
 
     #[test]
-    fn parse_packet_round_trips_and_rejects_short_data() {
-        let data = pack_cmd(CMD_USE, 0, 0, b"books", &[]);
-        let (cmd, arg, buf, buf1) = parse_packet(&data).unwrap();
-        assert_eq!(cmd, CMD_USE);
-        assert_eq!(arg, 0);
-        assert_eq!(buf, b"books");
-        assert!(buf1.is_empty());
-        assert_eq!(parse_packet(&data[..7]), None); // 头不足 8 字节
-        let bad = pack_cmd(CMD_OK, 0, 0, b"abc", &[]);
-        assert_eq!(parse_packet(&bad[..9]), None); // 长度字段超出实际数据
-    }
-
-    #[test]
     fn ini_scheme_parses_vnos_and_flags() {
         let ini = r#"
 project.name = demo

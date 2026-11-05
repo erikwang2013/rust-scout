@@ -15,13 +15,6 @@ use crate::{Result, SearchBuilder, SearchDocument, SearchHit, SearchResult};
 
 pub struct DatabaseEngine {
     pool: sqlx::SqlitePool,
-    /// **不再影响搜索范围**，仅保留以维持 [`Self::new`] 的公开签名。
-    ///
-    /// 早期用它拼 `searchable` 列，于是文本查询只覆盖这些字段，而基准驱动
-    /// （[`crate::CollectionEngine`]）搜整份文档 —— 同一输入两个驱动给出不同结果。
-    /// 现在粗筛对齐基准，这个字段成了摆设，待下个 breaking 版本连同构造参数一起删。
-    #[allow(dead_code)]
-    searchable_fields: Vec<String>,
     /// 表结构是否已建（见 [`Self::ensure_schema`]）。
     schema_ready: AtomicBool,
 }
@@ -29,22 +22,18 @@ pub struct DatabaseEngine {
 impl DatabaseEngine {
     /// 同步构造（`connect_lazy`：连接池延迟建连），保持 [`crate::EngineManager::engine`]
     /// 的同步签名。表结构在**首次操作**时建好（`CREATE ... IF NOT EXISTS`，幂等）。
-    ///
-    /// `searchable_fields` 已不参与搜索（见字段注释），保留只为不破坏签名。
-    pub fn new(database_url: &str, searchable_fields: Vec<String>) -> Result<Self> {
+    pub fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::sqlite::SqlitePoolOptions::new().connect_lazy(database_url)?;
         Ok(Self {
             pool,
-            searchable_fields,
             schema_ready: AtomicBool::new(false),
         })
     }
 
     #[cfg(test)]
-    fn from_pool(pool: sqlx::SqlitePool, searchable_fields: Vec<String>) -> Self {
+    fn from_pool(pool: sqlx::SqlitePool) -> Self {
         Self {
             pool,
-            searchable_fields,
             schema_ready: AtomicBool::new(false),
         }
     }
@@ -94,7 +83,7 @@ impl DatabaseEngine {
             // 整份序列化 JSON，所以粗筛也必须是整份 JSON。曾经只拼白名单字段的值，
             // 于是 `fields=["title"]` + 文档 {"title":"Rust","tag":"async"} + 查
             // "async" 会得到 database 0 条、collection 1 条 —— 八个驱动对同一输入
-            // 给出不同答案。`searchable_fields` 因此不再影响搜索范围。
+            // 给出不同答案。配置字段因此不再影响搜索范围。
             let data = serde_json::to_string(&doc.fields)?;
             let searchable = data.to_lowercase();
             sqlx::query(
@@ -211,7 +200,7 @@ impl DatabaseEngine {
         let q = builder.query.trim().to_lowercase();
         // `searchable` 列现在存整份字段 JSON 的小写（见 `write_all`），所以只要
         // 查询非空，粗筛就一定能覆盖 `matches()` 的结果 —— 不再需要「没配字段就
-        // 跳过粗筛」那种兜底：那时候 `database.fields` 缺省会让整列恒为 ""，
+        // 跳过粗筛」那种兜底：早期按配置字段拼 `searchable` 时，缺省会整列恒为 ""，
         // `searchable LIKE '%q%'` 一条都匹配不上，**每个文本查询都静默返回 0 条**。
         let like = !q.is_empty();
 
