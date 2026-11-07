@@ -1,10 +1,11 @@
 [package]
 name = "rust-scout"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 description = "Scout-style full-text search engine abstraction for Rust"
 license = "MIT"
 repository = "https://github.com/erikwang2013/rust-scout"
+homepage = "https://package.erik.xyz/scout"
 # 内部 AI 协作配置，不属于发布产物。
 # docs/ 同样排除：crates.io 渲染 README 时会把相对路径改写成 GitHub 的绝对地址
 #（`docs/svg/pet.svg` → `.../raw/HEAD/docs/svg/pet.svg`），从不读取 .crate 内的文件。
